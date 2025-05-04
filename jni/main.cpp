@@ -1,10 +1,10 @@
-    LOGI("Fingerprint: %s", #include <cstdlib>
+#include <cstdlib>
 #include <unistd.h>
-#include <android/log.h>
 #include <sys/system_properties.h>
 #include <dlfcn.h>
-#include <jni.h>
 #include <cstring>
+#include <android/log.h>
+#include <jni.h>
 
 #include "zygisk.hpp"
 
@@ -34,7 +34,7 @@ void dump_system_info() {
     LOGI("Device: %s", device);
     LOGI("Model: %s", model);
     LOGI("Manufacturer: %s", manufacturer);
-fingerprint);
+    LOGI("Fingerprint: %s", fingerprint);
     LOGI("=============================\n");
 }
 
