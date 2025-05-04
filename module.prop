@@ -1,0 +1,9 @@
+id=fingerprint_hardware_bypasser
+name=Fingerprint Hardware Detection Bypasser for HyperOS
+version=v1.0
+versionCode=1
+author=Your Name
+description=Zygisk module untuk bypass deteksi hardware fingerprint di Android 13+ dan HyperOS (Android 15) dengan hook isFpHardwareDetected()/isFingerprintHardwarePresent()/isFingerprintHardwareDetected()
+# Zygisk module configuration
+zygisk=true
+minMagisk=24000
