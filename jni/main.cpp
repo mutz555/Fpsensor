@@ -162,9 +162,10 @@ jboolean isFpHardwareDetected_hook(JNIEnv* env, jobject thiz) {
     }
     
     // Log a highly visible message to indicate the hook was successful
-    LOGI("===============================================");
-    LOGI(">> FINGERPRINT HARDWARE DETECTION BYPASSED! <<");
-    LOGI("===============================================");
+    LOGE("===============================================");
+    LOGE(">> FINGERPRINT HARDWARE DETECTION BYPASSED! <<");
+    LOGE(">> HOOK EXECUTED SUCCESSFULLY <<");
+    LOGE("===============================================");
     
     return JNI_TRUE; // Always return true for hardware detection
 }
@@ -222,12 +223,15 @@ public:
     void preServerSpecialize(zygisk::ServerSpecializeArgs* args) override {
         // Always hook system_server
         shouldHook = true;
-        LOGI("Targeting system_server for hooking");
+        LOGE("CRITICAL: Targeting system_server process for hooking (preServerSpecialize)");
     }
 
     void postServerSpecialize(const zygisk::ServerSpecializeArgs* args) override {
         if (shouldHook) {
+            LOGE("CRITICAL: Running installHooks in postServerSpecialize");
             installHooks();
+        } else {
+            LOGE("ERROR: shouldHook is false in postServerSpecialize");
         }
     }
 
@@ -256,7 +260,7 @@ private:
     
     // Override ALL fingerprint-related system properties to ensure detection works
     void setupSystemPropertyHooks() {
-        LOGI("OVERRIDE: Setting ALL system properties for fingerprint hardware");
+        LOGE("OVERRIDE: Setting ALL system properties for fingerprint hardware");
         
         // Common fingerprint properties across manufacturers
         const char* all_fp_props[][2] = {
