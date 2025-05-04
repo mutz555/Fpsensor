@@ -6,6 +6,10 @@
 #include <algorithm>
 #include <android/log.h>
 #include <jni.h>
+#include <fcntl.h>
+
+// Tambahkan xhook
+#include "xhook.h"
 
 #include "zygisk.hpp"
 
@@ -175,8 +179,50 @@ jstring systemPropertiesGetHookNoDef(JNIEnv* env, jclass clazz, jstring key) {
     return res;
 }
 
+// ======== Bagian xhook (native hook) ========
+
+// Simpan pointer asli fungsi open
+static int (*orig_open)(const char *pathname, int flags, ...) = nullptr;
+
+// Fungsi hook pengganti untuk open
+int my_open(const char *pathname, int flags, ...) {
+    LOGI("xhook: open called for file: %s", pathname);
+    va_list args;
+    va_start(args, flags);
+    int mode = 0;
+    if (flags & O_CREAT) {
+        mode = va_arg(args, int);
+    }
+    va_end(args);
+
+    // Panggil fungsi open asli
+    if (orig_open) {
+        if (flags & O_CREAT) {
+            return orig_open(pathname, flags, mode);
+        } else {
+            return orig_open(pathname, flags);
+        }
+    }
+    return -1;
+}
+
+// Fungsi inisialisasi dan aktivasi xhook
+void xhook_init() {
+    // Register hook ke open di libc.so (support 32/64 bit path)
+    int ret = xhook_register("^/system/lib(64)?/libc.so$", "open", (void*)my_open, (void**)&orig_open);
+    if (ret == 0) {
+        LOGI("xhook: registered hook for open()");
+    } else {
+        LOGE("xhook: failed to register hook for open()");
+    }
+    // Aktifkan hook
+    xhook_refresh(0);
+    LOGI("xhook: refresh done");
+}
+
+// ======== END Bagian xhook ========
+
 class FingerprintBypasserModule : public zygisk::ModuleBase {
-    // Constructor dengan atribut yang diperlukan
     __attribute__((constructor))
     static void init() {
         __android_log_print(ANDROID_LOG_ERROR, "FINGERPRINT_BYPASS", "Zygisk module loaded!");
@@ -196,6 +242,8 @@ public:
         if (vm) {
             LOGI("Successfully retrieved JavaVM pointer");
         }
+        // Inisialisasi xhook
+        xhook_init();
     }
 
     void preAppSpecialize(zygisk::AppSpecializeArgs* args) override {
