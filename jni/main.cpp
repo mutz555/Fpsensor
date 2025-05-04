@@ -173,7 +173,7 @@ class FingerprintBypasserModule : public zygisk::ModuleBase {
     // Constructor dengan atribut yang diperlukan
     __attribute__((constructor))
     static void init() {
-        android_log_print(ANDROID_LOG_ERROR, "FINGERPRINT_BYPASS", "Zygisk module loaded!");
+        __android_log_print(ANDROID_LOG_ERROR, "FINGERPRINT_BYPASS", "Zygisk module loaded!");
     }
 public:
     void onLoad(zygisk::Api* api, JNIEnv* env) override {
@@ -837,8 +837,7 @@ extern "C" {
     // This is required for Zygisk module detection
     JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
         // Use error level to ensure it shows up clearly in logs
-        __android_log_print(ANDROID_LOG_ERROR, "FINGERPRINT_BYPASS", 
-                           "JNI_OnLoad called - library loaded directly");
+        LOGE("JNI_OnLoad called - library loaded directly");
         return JNI_VERSION_1_6;
     }
 }
