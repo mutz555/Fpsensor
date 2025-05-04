@@ -5,7 +5,8 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := fingerprint_bypasser
 # Make sure we only use main.cpp and no other file
 LOCAL_SRC_FILES := main.cpp
-LOCAL_STATIC_LIBRARIES := libcxx
+# Removed libcxx dependency since it's causing issues in GitHub Actions
+# LOCAL_STATIC_LIBRARIES := libcxx
 LOCAL_LDLIBS := -llog -ldl
 LOCAL_CFLAGS += -std=c++17 -fno-rtti -fno-exceptions -DDISABLE_DOBBY_HOOK
 
@@ -17,5 +18,5 @@ LOCAL_SHARED_LIBRARIES :=
 
 include $(BUILD_SHARED_LIBRARY)
 
-# Only import libcxx, no other external dependencies
-$(call import-module,libcxx)
+# Removed import of libcxx which was causing build failures
+# $(call import-module,libcxx)
