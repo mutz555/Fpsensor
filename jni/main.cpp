@@ -321,7 +321,21 @@ private:
 };
 
 // Register module with proper entry point for Zygisk
-REGISTER_ZYGISK_MODULE(FingerprintBypasserModule)
+// Use manual implementation instead of macro to avoid compilation issues in GitHub Actions
+// The original macro REGISTER_ZYGISK_MODULE expands to this code
+extern "C" {
+    static FingerprintBypasserModule module;
+    
+    __attribute__((section(".zygisk"))) 
+    void zygisk_module_entry(zygisk::Api *api, JNIEnv *env) {
+        module.onLoad(api, env);
+    }
+    
+    __attribute__((section(".zygisk"))) 
+    void zygisk_companion_entry(zygisk::Api *api, JNIEnv *env) {
+        // No companion process for this module
+    }
+}
 
 // Required for Zygisk module detection
 extern "C" {
