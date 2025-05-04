@@ -3,7 +3,7 @@
 #include <android/log.h>
 #include <sys/system_properties.h>
 #include <dlfcn.h>
-#include <dobby.h>
+#include <jni.h>
 
 #include "zygisk.hpp"
 
@@ -182,13 +182,26 @@ private:
             }
             
             if (is_fp_hardware_detected_method != nullptr) {
-                // Set up the JNI hooking
-                const void* original = reinterpret_cast<const void*>(is_fp_hardware_detected_method);
-                DobbyHook(
-                    const_cast<void*>(original),
-                    reinterpret_cast<void*>(isFpHardwareDetected_hook),
-                    nullptr
-                );
+                // Instead of using Dobby for hooking, we'll use Zygisk API to directly
+                // register our JNI method and override the original
+                try {
+                    // Implement direct JNI method registration
+                    static JNINativeMethod methods[] = {
+                        {const_cast<char*>(TARGET_METHOD_HYPEROS), const_cast<char*>(TARGET_METHOD_SIG), 
+                         reinterpret_cast<void*>(isFpHardwareDetected_hook)}
+                    };
+                
+                    // Register our native method
+                    if (env->RegisterNatives(fingerprint_service_class, methods, 1) < 0) {
+                        LOGE("Failed to register native method");
+                    } else {
+                        LOGI("Successfully registered isFpHardwareDetected() replacement");
+                    }
+                } catch (const std::exception& e) {
+                    LOGE("Exception during hooking: %s", e.what());
+                } catch (...) {
+                    LOGE("Unknown exception during hooking");
+                }
                 
                 LOGI("Successfully hooked FingerprintServiceStubImpl.isFpHardwareDetected()");
             } else {
