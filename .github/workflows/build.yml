@@ -72,13 +72,13 @@ jobs:
           zip -r9 ../fingerprint_bypasser_hyperos.zip *
 
       - name: Upload module ZIP
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@main
         with:
           name: fingerprint_bypasser_hyperos
           path: fingerprint_bypasser_hyperos.zip
 
       - name: Upload debug .so files
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@main
         with:
           name: so_libraries_debug
           path: libs/*/libfingerprint_bypasser.so
