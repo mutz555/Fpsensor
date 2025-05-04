@@ -116,13 +116,16 @@ public:
 
     void preAppSpecialize(zygisk::AppSpecializeArgs* args) override {
         // We only care about system_server process
-        const char* process_name = env->GetStringUTFChars(args->nice_name, nullptr);
-        if (process_name) {
-            if (strstr(process_name, "system_server") != nullptr) {
-                shouldHook = true;
-                LOGI("Targeting system_server process for hooking");
+        if (args && args->nice_name) {
+            const char* process_name = env->GetStringUTFChars(args->nice_name, nullptr);
+            if (process_name) {
+                // Compare process name with system_server
+                if (strcmp(process_name, "system_server") == 0) {
+                    shouldHook = true;
+                    LOGI("Targeting system_server process for hooking");
+                }
+                env->ReleaseStringUTFChars(args->nice_name, process_name);
             }
-            env->ReleaseStringUTFChars(args->nice_name, process_name);
         }
     }
 
