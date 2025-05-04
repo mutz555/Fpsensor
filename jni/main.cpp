@@ -1,4 +1,4 @@
-#include <cstdlib>
+    LOGI("Fingerprint: %s", #include <cstdlib>
 #include <unistd.h>
 #include <android/log.h>
 #include <sys/system_properties.h>
@@ -34,7 +34,7 @@ void dump_system_info() {
     LOGI("Device: %s", device);
     LOGI("Model: %s", model);
     LOGI("Manufacturer: %s", manufacturer);
-    LOGI("Fingerprint: %s", fingerprint);
+fingerprint);
     LOGI("=============================\n");
 }
 
@@ -321,11 +321,7 @@ private:
 };
 
 // Register module with proper entry point for Zygisk
-// Implement module registration manually to avoid macro issues
-__attribute__((constructor)) static void zygiskModuleRegister() {
-    static FingerprintBypasserModule module;
-    zygisk::registerModule(&module);
-}
+REGISTER_ZYGISK_MODULE(FingerprintBypasserModule)
 
 // Required for Zygisk module detection
 extern "C" {
