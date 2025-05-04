@@ -4,6 +4,7 @@
 #include <sys/system_properties.h>
 #include <dlfcn.h>
 #include <jni.h>
+#include <cstring>
 
 #include "zygisk.hpp"
 
