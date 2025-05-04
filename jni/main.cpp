@@ -206,47 +206,162 @@ private:
     bool hookFingerprintServiceMethod() {
         LOGI("Attempting to hook FingerprintServiceStubImpl.isFpHardwareDetected");
         
-        jclass fingerprint_service_class = findClassWithClassLoader(TARGET_CLASS);
+        // Try multiple approaches for finding the class
+        LOGI("Attempt 1: Direct class lookup");
+        jclass fingerprint_service_class = env->FindClass(TARGET_CLASS);
+        
         if (fingerprint_service_class == nullptr) {
-            LOGE("Failed to find FingerprintServiceStubImpl class");
+            if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+            }
+            LOGI("Direct lookup failed, trying with class loader");
+            fingerprint_service_class = findClassWithClassLoader(TARGET_CLASS);
+        }
+        
+        if (fingerprint_service_class == nullptr) {
+            LOGE("CRITICAL ERROR: Failed to find FingerprintServiceStubImpl class");
+            LOGI("Looking for parent packages to debug class loading issues");
+            
+            // Try to find parent packages
+            const char* parent_packages[] = {
+                "com/android/server/biometrics/sensors/fingerprint",
+                "com/android/server/biometrics/sensors",
+                "com/android/server/biometrics",
+                "com/android/server"
+            };
+            
+            for (const char* pkg : parent_packages) {
+                LOGI("Checking if package exists: %s", pkg);
+                jclass test_class = findClassWithClassLoader(pkg);
+                if (test_class != nullptr) {
+                    LOGI("Found parent package: %s", pkg);
+                    env->DeleteLocalRef(test_class);
+                } else {
+                    LOGI("Package not found: %s", pkg);
+                }
+            }
+            
             return false;
         }
         
-        LOGI("Found FingerprintServiceStubImpl class, looking for method");
+        LOGI("SUCCESS: Found FingerprintServiceStubImpl class, looking for method");
         
-        // Try to find the method
-        jmethodID is_fp_hardware_detected_method = env->GetMethodID(
-            fingerprint_service_class, 
-            TARGET_METHOD_HYPEROS, 
-            TARGET_METHOD_SIG
-        );
+        // Try all possible method names for different Android versions
+        const char* method_names[] = {
+            TARGET_METHOD_HYPEROS,          // HyperOS
+            TARGET_METHOD_ANDROID14,        // Android 14
+            TARGET_METHOD_ANDROID13,        // Android 13
+            "isHardwareDetected"           // Generic fallback
+        };
         
-        if (is_fp_hardware_detected_method == nullptr) {
-            LOGE("Failed to find isFpHardwareDetected method");
+        jmethodID target_method = nullptr;
+        const char* successful_method = nullptr;
+        
+        for (const char* method_name : method_names) {
+            LOGI("Trying to find method: %s", method_name);
+            jmethodID method = env->GetMethodID(fingerprint_service_class, method_name, TARGET_METHOD_SIG);
+            
+            if (method != nullptr) {
+                LOGI("SUCCESS: Found method %s", method_name);
+                target_method = method;
+                successful_method = method_name;
+                break;
+            } else {
+                if (env->ExceptionCheck()) {
+                    env->ExceptionClear();
+                }
+                LOGI("Method %s not found, trying next", method_name);
+            }
+        }
+        
+        if (target_method == nullptr) {
+            LOGE("CRITICAL ERROR: Failed to find any fingerprint hardware detection method");
+            
+            // Get all methods of the class for debugging
+            jclass class_class = env->GetObjectClass(fingerprint_service_class);
+            jmethodID get_methods_method = env->GetMethodID(class_class, "getMethods", "()[Ljava/lang/reflect/Method;");
+            
+            if (get_methods_method != nullptr) {
+                LOGI("Dumping available methods in class:");
+                jobjectArray methods = (jobjectArray)env->CallObjectMethod(fingerprint_service_class, get_methods_method);
+                
+                if (methods != nullptr) {
+                    jsize method_count = env->GetArrayLength(methods);
+                    LOGI("Found %d methods in class", method_count);
+                    
+                    jclass method_class = env->FindClass("java/lang/reflect/Method");
+                    jmethodID get_name_method = env->GetMethodID(method_class, "getName", "()Ljava/lang/String;");
+                    
+                    for (jsize i = 0; i < min(15, method_count); i++) {
+                        jobject method = env->GetObjectArrayElement(methods, i);
+                        jstring method_name = (jstring)env->CallObjectMethod(method, get_name_method);
+                        
+                        if (method_name != nullptr) {
+                            const char* name = env->GetStringUTFChars(method_name, nullptr);
+                            LOGI("  Method[%d]: %s", i, name);
+                            env->ReleaseStringUTFChars(method_name, name);
+                            env->DeleteLocalRef(method_name);
+                        }
+                        
+                        env->DeleteLocalRef(method);
+                    }
+                    
+                    env->DeleteLocalRef(methods);
+                    env->DeleteLocalRef(method_class);
+                }
+            }
+            
+            env->DeleteLocalRef(class_class);
             env->DeleteLocalRef(fingerprint_service_class);
             return false;
         }
         
-        LOGI("Found isFpHardwareDetected method, registering hook");
+        LOGI("Setting up hook for method: %s", successful_method);
         
-        // Setup the hook
-        static JNINativeMethod methods[] = {
-            {const_cast<char*>(TARGET_METHOD_HYPEROS), const_cast<char*>(TARGET_METHOD_SIG), 
+        // Setup the hook with the found method name
+        static JNINativeMethod hook_methods[] = {
+            {const_cast<char*>(successful_method), const_cast<char*>(TARGET_METHOD_SIG), 
              reinterpret_cast<void*>(isFpHardwareDetected_hook)}
         };
         
-        // Register our native method - might require finding the right hook point
-        if (env->RegisterNatives(fingerprint_service_class, methods, 1) < 0) {
-            LOGE("Failed to register native method replacement - checking for errors");
+        // Register our native method
+        LOGI("CRITICAL STEP: Registering native method replacement");
+        int register_result = env->RegisterNatives(fingerprint_service_class, hook_methods, 1);
+        
+        if (register_result < 0) {
+            LOGE("CRITICAL ERROR: Failed to register native method - error code: %d", register_result);
+            
             if (env->ExceptionCheck()) {
+                LOGI("Exception occurred during RegisterNatives");
                 env->ExceptionDescribe();
                 env->ExceptionClear();
             }
+            
+            // Try to get more debug info
+            jthrowable exc = env->ExceptionOccurred();
+            if (exc) {
+                LOGI("Exception details:");
+                jclass exception_class = env->GetObjectClass(exc);
+                jmethodID getMessage = env->GetMethodID(exception_class, "getMessage", "()Ljava/lang/String;");
+                
+                jstring message = (jstring) env->CallObjectMethod(exc, getMessage);
+                if (message != nullptr) {
+                    const char* msg = env->GetStringUTFChars(message, nullptr);
+                    LOGI("Exception message: %s", msg);
+                    env->ReleaseStringUTFChars(message, msg);
+                    env->DeleteLocalRef(message);
+                }
+                
+                env->DeleteLocalRef(exception_class);
+                env->DeleteLocalRef(exc);
+            }
+            
             env->DeleteLocalRef(fingerprint_service_class);
             return false;
         }
         
-        LOGI("Successfully registered isFpHardwareDetected replacement");
+        LOGI("SUCCESS: Successfully registered hook for %s", successful_method);
+        LOGI("THE HOOK SHOULD NOW BE ACTIVE FOR FINGERPRINT HARDWARE DETECTION");
         env->DeleteLocalRef(fingerprint_service_class);
         
         return true;
@@ -357,18 +472,119 @@ private:
     // Alternative approach to find and hook the class
     void tryFindAndHookClassLoader() {
         // This is a backup approach if we can't find the class directly
-        LOGI("Trying alternative hooking approach by iterating through loaded classes");
+        LOGI("CRITICAL: Direct hooking failed - trying alternative approach");
         
-        // Dump important system packages to help with debugging
-        dumpPackageInfo("android.app.IActivityManager");
-        dumpPackageInfo("android.content.pm.IPackageManager");
-        dumpPackageInfo("com.android.server.biometrics.BiometricService");
-        dumpPackageInfo("com.android.server.biometrics.sensors.fingerprint.FingerprintService");
+        // Log more information about the process we're running in
+        char process_name[256];
+        FILE* cmd = popen("ps -p $$ -o comm=", "r");
+        if (cmd) {
+            fgets(process_name, sizeof(process_name), cmd);
+            process_name[strcspn(process_name, "\n")] = 0; // Remove trailing newline
+            pclose(cmd);
+            LOGI("Current process: %s", process_name);
+        }
         
-        // Scan all system_server classes for any fingerprint-related methods
-        scanForFingerprintClasses();
+        LOGI("Looking for fingerprint classes in different packages...");
         
-        LOGI("Attempting to hook on next load of the target class");
+        // Try different package patterns based on Android 13-15 variations
+        const char* packages_to_check[] = {
+            "com.android.server.biometrics.sensors.fingerprint.FingerprintServiceStubImpl", // HyperOS
+            "com.android.server.biometrics.fingerprint.FingerprintServiceImpl",           // Android 13
+            "com.android.server.biometrics.BiometricsService",                           // General
+            "android.hardware.biometrics.fingerprint.FingerprintManager",                // Client API
+            "android.hardware.fingerprint.FingerprintManager"                           // Older
+        };
+        
+        // Try to find ANY of these classes
+        for (const char* pkg : packages_to_check) {
+            LOGI("== Checking for class: %s", pkg);
+            jclass cls = findClassWithClassLoader(pkg);
+            if (cls != nullptr) {
+                LOGI("SUCCESS: Found alternative class: %s", pkg);
+                dumpClassMethods(cls, 10);
+                env->DeleteLocalRef(cls);
+            }
+        }
+        
+        // Try a more direct approach to hooking
+        LOGI("Trying direct property override as last resort");
+        setupSystemPropertyHooks(); // Set properties again to be sure
+        
+        // If we can't hook the method directly, try hooking Android property service
+        LOGI("Setting ALL fingerprint-related properties");
+        
+        // Common fingerprint properties across manufacturers
+        const char* fp_props[][2] = {
+            {"ro.vendor.fingerprint", "infinix/X6833B*/Infinix-X6833B*"},
+            {"persist.vendor.sys.fp.vendor", "goodix"},
+            {"persist.vendor.sys.fp.module", "true"},
+            {"ro.boot.fingerprint", "goodix"},
+            {"ro.boot.fpsensor", "goodix"},
+            {"ro.hardware.fingerprint", "goodix"},
+            {"ro.hardware.fp", "goodix"},
+            // Infinix-specific properties
+            {"ro.infinix.fingerprint", "goodix"},
+            {"sys.fp.goodix", "enabled"},
+            {"sys.fp.vendor", "goodix"}
+        };
+        
+        // Set all possible properties
+        for (const auto& prop : fp_props) {
+            __system_property_set(prop[0], prop[1]);
+            LOGI("  Set system property: %s = %s", prop[0], prop[1]);
+        }
+        
+        LOGI("COMPLETED ALTERNATIVE HOOKING - will rely on property overrides");
+    }
+    
+    // Helper to dump class methods
+    void dumpClassMethods(jclass cls, int maxMethods) {
+        if (cls == nullptr) return;
+        
+        jclass class_class = env->GetObjectClass(cls);
+        jmethodID get_methods_method = env->GetMethodID(class_class, "getMethods", "()[Ljava/lang/reflect/Method;");
+        
+        if (get_methods_method != nullptr) {
+            jobjectArray methods = (jobjectArray)env->CallObjectMethod(cls, get_methods_method);
+            
+            if (methods != nullptr) {
+                jsize method_count = env->GetArrayLength(methods);
+                LOGI("Class has %d methods, showing first %d", method_count, min(maxMethods, (int)method_count));
+                
+                jclass method_class = env->FindClass("java/lang/reflect/Method");
+                jmethodID get_name_method = env->GetMethodID(method_class, "getName", "()Ljava/lang/String;");
+                jmethodID get_return_method = env->GetMethodID(method_class, "getReturnType", "()Ljava/lang/Class;");
+                
+                if (method_class != nullptr && get_name_method != nullptr) {
+                    for (jsize i = 0; i < min(maxMethods, method_count); i++) {
+                        jobject method = env->GetObjectArrayElement(methods, i);
+                        jstring method_name = (jstring)env->CallObjectMethod(method, get_name_method);
+                        
+                        if (method_name != nullptr) {
+                            const char* name = env->GetStringUTFChars(method_name, nullptr);
+                            
+                            // Look for fingerprint methods specifically
+                            if (strstr(name, "ingerprint") || strstr(name, "Biometric") || 
+                                strstr(name, "isHardware") || strstr(name, "detect")) {
+                                LOGI("*** IMPORTANT - Found method: %s", name);
+                            } else {
+                                LOGI("Method[%d]: %s", i, name);
+                            }
+                            
+                            env->ReleaseStringUTFChars(method_name, name);
+                            env->DeleteLocalRef(method_name);
+                        }
+                        
+                        env->DeleteLocalRef(method);
+                    }
+                }
+                
+                env->DeleteLocalRef(methods);
+                if (method_class != nullptr) env->DeleteLocalRef(method_class);
+            }
+        }
+        
+        env->DeleteLocalRef(class_class);
     }
     
     // Helper to dump package information for debugging
