@@ -1,12 +1,12 @@
 LOCAL_PATH := $(call my-dir)
 
-# ===== Modul Static Library untuk xhook (file C saja) =====
+# Modul static library untuk xhook (file C)
 include $(CLEAR_VARS)
 LOCAL_MODULE := xhook
 LOCAL_SRC_FILES := xhook.c
 include $(BUILD_STATIC_LIBRARY)
 
-# ===== Modul Shared Library utama (file C++ saja) =====
+# Modul utama fingerprint_bypasser (file C++)
 include $(CLEAR_VARS)
 LOCAL_MODULE := fingerprint_bypasser
 LOCAL_SRC_FILES := main.cpp
