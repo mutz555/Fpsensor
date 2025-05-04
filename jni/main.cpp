@@ -317,7 +317,11 @@ private:
 };
 
 // Register module with proper entry point for Zygisk
-REGISTER_ZYGISK_MODULE(FingerprintBypasserModule)
+// Implement module registration manually to avoid macro issues
+__attribute__((constructor)) static void zygiskModuleRegister() {
+    static FingerprintBypasserModule module;
+    zygisk::registerModule(&module);
+}
 
 // Required for Zygisk module detection
 extern "C" {
