@@ -66,26 +66,50 @@ const char* TARGET_METHOD_SIG = "()Z"; // method signature - returns boolean, no
  * Always returns true regardless of actual hardware status
  */
 jboolean isFpHardwareDetected_hook(JNIEnv* env, jobject thiz) {
-    LOGI("Hardware fingerprint detection method hooked - returning TRUE");
+    static int hook_call_count = 0;
+    hook_call_count++;
     
-    // Get calling class and method for debugging
+    LOGI("!!!!! HOOKED: Fingerprint hardware detection method called %d times - FORCING TRUE !!!!!", hook_call_count);
+    LOGI("!!!!! ANY APP CHECKING FOR FINGERPRINT HARDWARE WILL NOW GET TRUE !!!!!");
+    
+    // Dump the calling stack for debugging
     jclass threadClass = env->FindClass("java/lang/Thread");
     if (threadClass) {
         jmethodID currentThreadMethod = env->GetStaticMethodID(threadClass, "currentThread", "()Ljava/lang/Thread;");
         if (currentThreadMethod) {
             jobject threadObj = env->CallStaticObjectMethod(threadClass, currentThreadMethod);
             if (threadObj) {
+                // Get current thread name for context
+                jmethodID getNameMethod = env->GetMethodID(threadClass, "getName", "()Ljava/lang/String;");
+                if (getNameMethod) {
+                    jstring nameStr = (jstring)env->CallObjectMethod(threadObj, getNameMethod);
+                    if (nameStr) {
+                        const char* threadName = env->GetStringUTFChars(nameStr, nullptr);
+                        LOGI("Called from thread: %s", threadName);
+                        env->ReleaseStringUTFChars(nameStr, threadName);
+                        env->DeleteLocalRef(nameStr);
+                    }
+                }
+                
+                // Get stack trace for caller info
                 jmethodID getStackTraceMethod = env->GetMethodID(threadClass, "getStackTrace", "()[Ljava/lang/StackTraceElement;");
                 if (getStackTraceMethod) {
                     jobjectArray stackArray = (jobjectArray)env->CallObjectMethod(threadObj, getStackTraceMethod);
-                    if (stackArray && env->GetArrayLength(stackArray) > 1) {
-                        jobject element = env->GetObjectArrayElement(stackArray, 1); // Get caller element
-                        if (element) {
-                            jclass elementClass = env->GetObjectClass(element);
-                            jmethodID getClassNameMethod = env->GetMethodID(elementClass, "getClassName", "()Ljava/lang/String;");
-                            jmethodID getMethodNameMethod = env->GetMethodID(elementClass, "getMethodName", "()Ljava/lang/String;");
-                            
-                            if (getClassNameMethod && getMethodNameMethod) {
+                    if (stackArray) {
+                        jsize stackSize = env->GetArrayLength(stackArray);
+                        LOGI("Stack depth: %d", stackSize);
+                        
+                        // Create a formatted stack trace output
+                        LOGI("CALL STACK:");
+                        
+                        jclass elementClass = env->FindClass("java/lang/StackTraceElement");
+                        jmethodID getClassNameMethod = env->GetMethodID(elementClass, "getClassName", "()Ljava/lang/String;");
+                        jmethodID getMethodNameMethod = env->GetMethodID(elementClass, "getMethodName", "()Ljava/lang/String;");
+                        
+                        // Examine up to 10 stack frames
+                        for (jsize i = 0; i < min(10, stackSize); i++) {
+                            jobject element = env->GetObjectArrayElement(stackArray, i);
+                            if (element) {
                                 jstring classNameStr = (jstring)env->CallObjectMethod(element, getClassNameMethod);
                                 jstring methodNameStr = (jstring)env->CallObjectMethod(element, getMethodNameMethod);
                                 
@@ -93,17 +117,21 @@ jboolean isFpHardwareDetected_hook(JNIEnv* env, jobject thiz) {
                                     const char* className = env->GetStringUTFChars(classNameStr, nullptr);
                                     const char* methodName = env->GetStringUTFChars(methodNameStr, nullptr);
                                     
-                                    LOGD("Called from: %s.%s()", className, methodName);
+                                    LOGI("  [%d] %s.%s()", i, className, methodName);
                                     
                                     env->ReleaseStringUTFChars(classNameStr, className);
                                     env->ReleaseStringUTFChars(methodNameStr, methodName);
+                                    env->DeleteLocalRef(classNameStr);
+                                    env->DeleteLocalRef(methodNameStr);
                                 }
+                                
+                                env->DeleteLocalRef(element);
                             }
-                            env->DeleteLocalRef(elementClass);
-                            env->DeleteLocalRef(element);
                         }
+                        
+                        env->DeleteLocalRef(elementClass);
+                        env->DeleteLocalRef(stackArray);
                     }
-                    if (stackArray) env->DeleteLocalRef(stackArray);
                 }
                 env->DeleteLocalRef(threadObj);
             }
@@ -111,21 +139,63 @@ jboolean isFpHardwareDetected_hook(JNIEnv* env, jobject thiz) {
         env->DeleteLocalRef(threadClass);
     }
     
-    LOGT("Hardware fingerprint detection hook completed");
-    return JNI_TRUE;
+    // Make sure we set all system properties again to guarantee proper values
+    static bool refreshed_properties = false;
+    if (!refreshed_properties) {
+        LOGI("Refreshing all system properties during hook execution");
+        // Re-apply property overrides when hook is actually called
+        const char* all_fp_props[][2] = {
+            {"persist.vendor.sys.fp.vendor", "goodix"},
+            {"persist.vendor.sys.fp.module", "true"},
+            {"ro.vendor.fingerprint", "infinix/X6833B*/Infinix-X6833B*"},
+            {"ro.boot.fingerprint", "goodix"},
+            {"ro.hardware.fingerprint", "goodix"},
+            {"ro.hardware.fingerprint.supported", "1"}
+        };
+        
+        int prop_count = sizeof(all_fp_props) / sizeof(all_fp_props[0]);
+        for (int i = 0; i < prop_count; i++) {
+            __system_property_set(all_fp_props[i][0], all_fp_props[i][1]);
+        }
+        
+        refreshed_properties = true;
+    }
+    
+    // Log a highly visible message to indicate the hook was successful
+    LOGI("===============================================");
+    LOGI(">> FINGERPRINT HARDWARE DETECTION BYPASSED! <<");
+    LOGI("===============================================");
+    
+    return JNI_TRUE; // Always return true for hardware detection
 }
 
 class FingerprintBypasserModule : public zygisk::ModuleBase {
+    // Constructor dengan atribut yang diperlukan
+    __attribute__((constructor))
+    static void init() {
+        android_log_print(ANDROID_LOG_ERROR, "FINGERPRINT_BYPASS", "Zygisk module loaded!");
+    }
 public:
     void onLoad(zygisk::Api* api, JNIEnv* env) override {
         this->api = api;
         this->env = env;
         
         // Print module version and system information for debugging
-        LOGI("=================================");
-        LOGI("Fingerprint Bypasser Module v1.0");
-        LOGI("=================================");
+        LOGI("**************************************************");
+        LOGI("*   Fingerprint Bypasser Module v1.0 LOADED!    *");
+        LOGI("*          Build date: May 4, 2025             *");
+        LOGI("**************************************************");
+        
+        // Log detailed environment information
+        LOGI("Module loaded into process memory");
         dump_system_info();
+        
+        // Pre-fetch Java environment early to ensure availability
+        JavaVM* vm;
+        env->GetJavaVM(&vm);
+        if (vm) {
+            LOGI("Successfully retrieved JavaVM pointer");
+        }
     }
 
     void preAppSpecialize(zygisk::AppSpecializeArgs* args) override {
@@ -184,22 +254,53 @@ private:
         }
     }
     
-    // Hook the system property to override fingerprint vendor property
+    // Override ALL fingerprint-related system properties to ensure detection works
     void setupSystemPropertyHooks() {
-        LOGI("Setting up system property hooks for fingerprint hardware detection");
+        LOGI("OVERRIDE: Setting ALL system properties for fingerprint hardware");
         
-        // Set the property values directly based on device logs
-        __system_property_set(TARGET_PROP, "goodix");
-        __system_property_set(HARDWARE_PROP, "true");
+        // Common fingerprint properties across manufacturers
+        const char* all_fp_props[][2] = {
+            // Primary properties we need to set based on logs
+            {"persist.vendor.sys.fp.vendor", "goodix"},
+            {"persist.vendor.sys.fp.module", "true"},
+            {"ro.vendor.fingerprint", "infinix/X6833B*/Infinix-X6833B*"},
+            
+            // Additional properties that might be checked
+            {"ro.boot.fingerprint", "goodix"},
+            {"ro.boot.fpsensor", "goodix"},
+            {"ro.hardware.fingerprint", "goodix"},
+            {"ro.hardware.fp", "goodix"},
+            {"sys.fp.goodix", "enabled"},
+            {"sys.fp.vendor", "goodix"},
+            
+            // Infinix-specific properties
+            {"ro.infinix.fingerprint", "goodix"},
+            
+            // Force enable at framework level
+            {"ro.hardware.fingerprint.supported", "1"},
+            {"ro.vendor.fingerprint.supported", "1"},
+            {"ro.vendor.infinix.fingerprint.supported", "1"},
+            {"persist.sys.fp.supported", "1"},
+            
+            // Try all possible variations of vendor properties
+            {"vendor.sys.fp.module", "true"},
+            {"vendor.sys.fp.present", "true"},
+            {"vendor.sys.fp.enable", "true"},
+            {"vendor.sys.fp.hardware", "true"}
+        };
         
-        // Set the vendor fingerprint property that we saw in logs
-        __system_property_set(VENDOR_FINGERPRINT_PROP, DEVICE_FINGERPRINT_VALUE);
+        // Set all properties
+        int prop_count = sizeof(all_fp_props) / sizeof(all_fp_props[0]);
         
-        // Log all properties that we've set
-        LOGI("System properties set:");
-        LOGI("  %s = goodix", TARGET_PROP);
-        LOGI("  %s = true", HARDWARE_PROP);
-        LOGI("  %s = %s", VENDOR_FINGERPRINT_PROP, DEVICE_FINGERPRINT_VALUE);
+        LOGI("OVERRIDE: Setting %d fingerprint system properties", prop_count);
+        
+        for (int i = 0; i < prop_count; i++) {
+            __system_property_set(all_fp_props[i][0], all_fp_props[i][1]);
+            LOGI("  [%d/%d] Set: %s = %s", i+1, prop_count, all_fp_props[i][0], all_fp_props[i][1]);
+        }
+        
+        LOGI("OVERRIDE: All fingerprint properties have been set");
+        LOGI("=== If fingerprint detection still fails, please check logcat for errors ===\n");
     }
     
     // Hook the FingerprintServiceStubImpl.isFpHardwareDetected method
@@ -712,27 +813,32 @@ private:
     }
 };
 
-// Register module with proper entry point for Zygisk
-// Use manual implementation instead of macro to avoid compilation issues in GitHub Actions
-// The original macro REGISTER_ZYGISK_MODULE expands to this code
+// Proper Zygisk module registration - CRITICAL PART
+// Manual implementation of REGISTER_ZYGISK_MODULE macro for better compatibility
+// This ensures it works on all Android versions and loads correctly
 extern "C" {
+    // Create a static instance of our module - this is key for proper loading
     static FingerprintBypasserModule module;
     
+    // Required ZygiskModule entry point - MUST have .zygisk section attribute
     __attribute__((section(".zygisk"))) 
     void zygisk_module_entry(zygisk::Api *api, JNIEnv *env) {
+        LOGI("ENTRY POINT: zygisk_module_entry called! Module is loading");
         module.onLoad(api, env);
     }
     
+    // Required companion entry point - also with .zygisk section
     __attribute__((section(".zygisk"))) 
     void zygisk_companion_entry(zygisk::Api *api, JNIEnv *env) {
-        // No companion process for this module
+        // We don't use companion process for this module
+        LOGI("ENTRY POINT: companion_entry called (not used)");
     }
-}
-
-// Required for Zygisk module detection
-extern "C" {
+    
+    // This is required for Zygisk module detection
     JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
-        LOGI("Fingerprint Bypasser module JNI_OnLoad called");
+        // Use error level to ensure it shows up clearly in logs
+        __android_log_print(ANDROID_LOG_ERROR, "FINGERPRINT_BYPASS", 
+                           "JNI_OnLoad called - library loaded directly");
         return JNI_VERSION_1_6;
     }
 }
