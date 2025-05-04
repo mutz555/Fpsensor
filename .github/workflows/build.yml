@@ -1,0 +1,84 @@
+name: Build Zygisk Module
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch: # Untuk trigger manual dari UI GitHub
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up JDK 11
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '11'
+
+      - name: Install required packages
+        run: sudo apt-get update && sudo apt-get install -y wget unzip build-essential cmake
+
+      - name: Download Android NDK
+        run: |
+          wget -q https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
+          unzip -q android-ndk-r25c-linux.zip
+          echo "NDK_HOME=$PWD/android-ndk-r25c" >> $GITHUB_ENV
+
+      - name: Download and setup Dobby library
+        run: |
+          mkdir -p jni/dobby
+          git clone --depth=1 https://github.com/jmpews/Dobby.git jni/dobby
+          mkdir -p jni/dobby/build
+          cd jni/dobby/build
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DDOBBY_BUILD_SHARED_LIBRARY=ON
+          make -j$(nproc)
+
+      - name: Build Zygisk module
+        run: |
+          export PATH=$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
+          cd jni
+          $NDK_HOME/ndk-build -j$(nproc) APP_ABI="armeabi-v7a arm64-v8a x86 x86_64"
+
+      - name: Prepare module distribution
+        run: |
+          # Create module directory structure
+          mkdir -p module_tmp/zygisk
+          
+          # Setup main directories
+          mkdir -p module_tmp/zygisk/arm64-v8a
+          mkdir -p module_tmp/zygisk/armeabi-v7a
+          mkdir -p module_tmp/zygisk/x86
+          mkdir -p module_tmp/zygisk/x86_64
+          
+          # Copy built libraries
+          cp -f libs/arm64-v8a/libfingerprint_bypasser.so module_tmp/zygisk/arm64-v8a/
+          cp -f libs/armeabi-v7a/libfingerprint_bypasser.so module_tmp/zygisk/armeabi-v7a/
+          cp -f libs/x86/libfingerprint_bypasser.so module_tmp/zygisk/x86/
+          cp -f libs/x86_64/libfingerprint_bypasser.so module_tmp/zygisk/x86_64/
+          
+          # Copy module files
+          cp -f module.prop module_tmp/
+          cp -f customize.sh module_tmp/
+          cp -f uninstall.sh module_tmp/
+          cp -f README.md module_tmp/
+          
+          # Create ZIP file
+          cd module_tmp
+          zip -r9 ../fingerprint_bypasser_hyperos.zip *
+
+      - name: Upload module ZIP
+        uses: actions/upload-artifact@v3
+        with:
+          name: fingerprint_bypasser_hyperos
+          path: fingerprint_bypasser_hyperos.zip
+
+      - name: Upload debug .so files
+        uses: actions/upload-artifact@v3
+        with:
+          name: so_libraries_debug
+          path: libs/*/libfingerprint_bypasser.so
