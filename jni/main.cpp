@@ -11,7 +11,7 @@
 #include "xhook.h"
 
 // For Zygisk
-#include "zygisk.h"
+#include "zygisk.hpp"
 
 #define LOG_TAG "XHookJNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
