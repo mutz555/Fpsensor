@@ -42,11 +42,12 @@ public:
         LOGI("xhook registered successfully");
     }
 
-    void preAppSpecialize(const zygisk::AppSpecializeArgs *args) override {
+    // HAPUS 'const' DI BAWAH INI
+    void preAppSpecialize(zygisk::AppSpecializeArgs *args) override {
         LOGI("preAppSpecialize");
     }
 
-    void postAppSpecialize(const zygisk::AppSpecializeArgs *args) override {
+    void postAppSpecialize(zygisk::AppSpecializeArgs *args) override {
         LOGI("postAppSpecialize");
     }
 };
