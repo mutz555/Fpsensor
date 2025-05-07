@@ -1,7 +1,7 @@
 #include <jni.h>
 #include <android/log.h>
 #include <android/native_window.h>
-#include <zygisksub/zygisk.hpp>
+#include <zygisk.hpp>
 #include "xhook.h"
 
 #define LOG_TAG "ZygiskHook"
