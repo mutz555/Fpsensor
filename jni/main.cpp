@@ -43,11 +43,11 @@ public:
     }
 
     // HAPUS 'const' DI BAWAH INI
-    void preAppSpecialize(zygisk::AppSpecializeArgs *args) override {
+    void postAppSpecialize(zygisk::AppSpecializeArgs *args) override {
         LOGI("preAppSpecialize");
     }
 
-    void postAppSpecialize(zygisk::AppSpecializeArgs *args) override {
+    void preAppSpecialize(zygisk::AppSpecializeArgs *args) override {
         LOGI("postAppSpecialize");
     }
 };
