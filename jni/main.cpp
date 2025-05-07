@@ -1,25 +1,13 @@
-#include <cstdlib>
-#include <unistd.h>
-#include <sys/system_properties.h>
-#include <dlfcn.h>
-#include <cstring>
-#include <algorithm>
-#include <android/log.h>
 #include <jni.h>
-#include <fcntl.h>
-
-// Tambahkan xhook
-#include "xhook.h"
-
+#include <android/log.h>
+#include <android/native_window_jni.h>
 #include "zygisk.hpp"
+#include "xhook.h"
 
 #define LOG_TAG "ZygiskXHook"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-// ===========================
-// Native Hook Functions
-// ===========================
+// Hook target functions
 static void (*orig_ANativeWindow_disconnect)(ANativeWindow *window) = nullptr;
 static void my_ANativeWindow_disconnect(ANativeWindow *window) {
     LOGI("Hooked: ANativeWindow_disconnect");
@@ -34,19 +22,15 @@ static int my_ANativeWindow_setBuffersGeometry(ANativeWindow* window, int w, int
         : -1;
 }
 
-// ===========================
-// JNI (optional, bisa dipanggil dari Java)
-// ===========================
+// JNI_OnLoad
 extern "C"
 jint JNI_OnLoad(JavaVM *vm, void *reserved) {
-    LOGI("JNI_OnLoad dipanggil");
+    LOGI("JNI_OnLoad called");
     return JNI_VERSION_1_6;
 }
 
-// ===========================
 // Zygisk Module
-// ===========================
-class MyZygiskModule : public zygisk::Module {
+class MyZygiskModule : public zygisk::ModuleBase {
 public:
     void onLoad(zygisk::Api *api, JNIEnv *env) override {
         LOGI("Zygisk onLoad start");
@@ -59,11 +43,11 @@ public:
     }
 
     void preAppSpecialize(const zygisk::AppSpecializeArgs *args) override {
-        LOGI("preAppSpecialize: %s", args->nice_name);
+        LOGI("preAppSpecialize");
     }
 
     void postAppSpecialize(const zygisk::AppSpecializeArgs *args) override {
-        LOGI("postAppSpecialize: %s", args->nice_name);
+        LOGI("postAppSpecialize");
     }
 };
 
