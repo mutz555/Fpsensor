@@ -102,7 +102,7 @@ public:
         LOGI("ZygiskSpoof module loaded");
     }
 
-    void preAppSpecialize(const zygisk::AppSpecializeArgs *args) override {
+    void preAppSpecialize(zygisk::AppSpecializeArgs *args) override {
         // Periksa apakah ini aplikasi target
         if (args->nice_name) {
             const char *pkg = zygisk_env->GetStringUTFChars(args->nice_name, nullptr);
@@ -120,7 +120,7 @@ public:
             if (!is_target) {
                 // Jika bukan aplikasi target, batalkan proses hook
                 LOGI("Bukan aplikasi target: %s", current_package.c_str());
-                zygisk_api->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
+                
                 return;
             }
             
