@@ -92,21 +92,21 @@ class SpoofModule : public zygisk::ModuleBase {
     }
 
     void preAppSpecialize(zygisk::AppSpecializeArgs *args) override {
-        jstring jname = args->nice_name;
-const char* cname = env->GetStringUTFChars(jname, nullptr);
-std::string current_package = std::string(cname);
-env->ReleaseStringUTFChars(jname, cname);
+    JNIEnv *env = args->env;
+    jstring jname = args->nice_name;
+    const char* cname = env->GetStringUTFChars(jname, nullptr);
+    std::string current_package = std::string(cname);
+    env->ReleaseStringUTFChars(jname, cname);
 
-        for (const char **app = target_apps; *app; ++app) {
-            if (current_package == *app) {
-                LOGI("Target app: %s", current_package.c_str());
-                setupHooks();
-                return;
-            }
+    for (const char **app = target_apps; *app; ++app) {
+        if (current_package == *app) {
+            LOGI("Target app: %s", current_package.c_str());
+            setupHooks();
+            return;
         }
-
-        LOGI("Bukan target app: %s", current_package.c_str());
     }
+
+    LOGI("Bukan target app: %s", current_package.c_str());
 };
 
 REGISTER_ZYGISK_MODULE(SpoofModule)
