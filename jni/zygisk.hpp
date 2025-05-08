@@ -1,61 +1,82 @@
-#include <cstring>
-#include <android/log.h>
-#include "zygisk.hpp"
-#include <sys/system_properties.h>
+#pragma once
 
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "[ZygiskSpoof]", __VA_ARGS__)
+#include <jni.h>
 
-static const char *target_apps[] = {
-    "com.mobile.legends",
-    "com.miHoYo.GenshinImpact",
-    "com.miHoYo.hkrpg",
-    "com.tencent.ig",
-    "com.garena.game.codm",
-    nullptr
+namespace zygisk {
+
+enum class Status {
+    DISABLED,
+    UNSUPPORTED,
+    ACTIVE,
 };
 
-bool shouldSpoof(const char *packageName) {
-    for (const char **target = target_apps; *target; ++target) {
-        if (strcmp(packageName, *target) == 0) return true;
-    }
-    return false;
+enum : int {
+    PROCESS_DAEMON,
+    PROCESS_MAIN,
+    PROCESS_COMPANION,
+    PROCESS_APP_ZYGOTE,
+    PROCESS_SYSTEM_SERVER,
+};
+
+struct AppSpecializeArgs {
+    jint &uid;
+    jint &gid;
+    jintArray &gids;
+    jint &runtime_flags;
+    jobjectArray &mount_external;
+    jstring &se_info;
+    jstring &nice_name;
+    jstring &instruction_set;
+    jstring &app_data_dir;
+
+    jboolean *const is_child_zygote;
+    jboolean *const is_top_app;
+    jobjectArray *const pkg_data_info_list;
+    jobjectArray *const whitelisted_data_info_list;
+    jboolean *const mount_data_dirs;
+    jboolean *const mount_storage_dirs;
+};
+
+struct ServerSpecializeArgs {
+    jint &uid;
+    jint &gid;
+    jintArray &gids;
+    jint &runtime_flags;
+    jlong &permitted_capabilities;
+    jlong &effective_capabilities;
+};
+
+class Api {
+public:
+    virtual bool connectCompanion() = 0;
+    virtual int getCompanionFd() = 0;
+    virtual void setOption(const int option) = 0;
+    virtual void setOption(const int option, const bool value) = 0;
+    virtual int getApiVersion() = 0;
+
+protected:
+    ~Api() = default;
+};
+
+class ModuleBase {
+public:
+    ModuleBase() = default;
+    virtual ~ModuleBase() = default;
+
+    virtual void onLoad(Api *api, JNIEnv *env) {}
+    virtual void preAppSpecialize(AppSpecializeArgs *args) {}
+    virtual void postAppSpecialize(const AppSpecializeArgs *args) {}
+    virtual void preServerSpecialize(ServerSpecializeArgs *args) {}
+    virtual void postServerSpecialize(const ServerSpecializeArgs *args) {}
+};
+
+void registerModule(ModuleBase *module);
+
 }
 
-class SpoofModule : public zygisk::ModuleBase {
-private:
-    zygisk::Api *zygisk_api = nullptr;
-    JNIEnv *zygisk_env = nullptr;
+#define REGISTER_ZYGISK_MODULE(clazz) 
+attribute((constructor)) static void zygiskModuleRegister() { 
+static clazz module; 
+zygisk::registerModule(&module); 
+}
 
-public:
-    void onLoad(zygisk::Api *api, JNIEnv *env) override {
-        zygisk_api = api;
-        zygisk_env = env;
-        LOGI("ZygiskSpoof module loaded");
-    }
-
-    void postAppSpecialize(const zygisk::AppSpecializeArgs *args) override {
-        const char *pkg = zygisk_env->GetStringUTFChars(args->nice_name, nullptr);
-        if (shouldSpoof(pkg)) {
-            LOGI("Target app detected: %s", pkg);
-            __system_property_set("ro.product.model", "SM-S928B");
-            __system_property_set("ro.product.brand", "samsung");
-            __system_property_set("ro.product.manufacturer", "samsung");
-            __system_property_set("ro.product.device", "dm3q");
-            __system_property_set("ro.product.name", "dm3qxx");
-            __system_property_set("ro.build.display.id", "UP1A.231005.007");
-            __system_property_set("ro.build.id", "UP1A.231005.007");
-            __system_property_set("ro.build.tags", "release-keys");
-            __system_property_set("ro.build.type", "user");
-            __system_property_set("ro.build.user", "dpi");
-            __system_property_set("ro.build.host", "21DJB");
-            __system_property_set("ro.board.platform", "kalama");
-            __system_property_set("ro.soc.manufacturer", "Qualcomm Technologies, Inc.");
-            __system_property_set("ro.soc.model", "SM8650");
-        } else {
-            LOGI("Non-target app: %s", pkg);
-        }
-        zygisk_env->ReleaseStringUTFChars(args->nice_name, pkg);
-    }
-};
-
-REGISTER_ZYGISK_MODULE(SpoofModule);
