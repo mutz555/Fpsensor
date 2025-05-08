@@ -2,7 +2,7 @@
 #include <string>
 #include <android/log.h>
 #include "zygisk.hpp"
-#include "xhook/xhook.h"
+#include "xhook.h"
 #include <sys/system_properties.h>
 
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "[ZygiskSpoof]", __VA_ARGS__)
