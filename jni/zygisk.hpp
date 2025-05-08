@@ -1,6 +1,6 @@
 #include <cstring>
 #include <android/log.h>
-#include "zygisk.h"
+#include "zygisk.hpp"
 #include <sys/system_properties.h>
 
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "[ZygiskSpoof]", __VA_ARGS__)
