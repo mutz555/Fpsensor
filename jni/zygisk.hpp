@@ -74,9 +74,8 @@ void registerModule(ModuleBase *module);
 
 }
 
-#define REGISTER_ZYGISK_MODULE(clazz) 
-attribute((constructor)) static void zygiskModuleRegister() { 
-static clazz module; 
-zygisk::registerModule(&module); 
-}
-
+#define REGISTER_ZYGISK_MODULE(clazz) \
+    __attribute__((constructor)) static void zygiskModuleRegister() { \
+        static clazz module; \
+        zygisk::registerModule(&module); \
+    }
