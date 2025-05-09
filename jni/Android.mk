@@ -16,7 +16,7 @@ include $(BUILD_STATIC_LIBRARY)
 # Modul utama fingerprint_bypasser
 include $(CLEAR_VARS)
 LOCAL_MODULE := fingerprint_bypasser
-LOCAL_SRC_FILES := main.cpp / zygisk.cpp
+LOCAL_SRC_FILES := main.cpp / zygisk.cpp / module.cpp
 LOCAL_STATIC_LIBRARIES := xhook
 LOCAL_LDLIBS := -llog -ldl
 LOCAL_CFLAGS += -fno-rtti -fno-exceptions -DDISABLE_DOBBY_HOOK
