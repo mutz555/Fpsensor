@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <android/log.h>
 #include "zygisk.hpp"
+#include "main.cpp"
 
 // Pastikan ini adalah modul utama Zygisk dengan entry point yang benar
 #define ZYGISK_MODULE_NAME "SnapdragonSpoof"
