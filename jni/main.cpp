@@ -236,7 +236,6 @@ public:
         const char *process = nullptr;
 
         // Get process name from JNI args - access via reference
-        JNIEnv *env = api->getJNIEnv();
         if (args->nice_name) {
             process = jstring_to_cstr(env, args->nice_name);
         }
