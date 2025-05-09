@@ -116,6 +116,18 @@ static const char *get_process_name() {
     return process_name;
 }
 
+// Convert jstring to C string
+static const char *jstring_to_cstr(JNIEnv *env, jstring jstr) {
+    if (!jstr) return nullptr;
+    const char *str = env->GetStringUTFChars(jstr, nullptr);
+    if (str) {
+        strncpy(process_name, str, sizeof(process_name) - 1);
+        env->ReleaseStringUTFChars(jstr, str);
+        return process_name;
+    }
+    return nullptr;
+}
+
 // Check if we should spoof for this process
 static bool should_spoof() {
     if (enable_spoof) return true;
@@ -213,12 +225,18 @@ public:
     
     void preAppSpecialize(zygisk::AppSpecializeArgs *args) override {
         // Check if we should enable for this app
-        const char *process = args->nice_name;
-        if (process == nullptr) {
-            process = args->process_name;
+        const char *process = nullptr;
+        
+        // Get process name from JNI args
+        if (args->nice_name) {
+            process = jstring_to_cstr(args->env, args->nice_name);
         }
         
-        strncpy(process_name, process ? process : "", sizeof(process_name) - 1);
+        // If nice_name is not available, try to get from cmdline
+        if (!process || process[0] == '\0') {
+            get_process_name();
+            process = process_name;
+        }
         
         for (const char *pkg : target_packages) {
             if (strstr(process_name, pkg)) {
@@ -230,7 +248,7 @@ public:
         
         if (!enable_spoof) {
             // Not a target app, exempt the process
-            api->setOption(zygisk::Option::DLCLOSE_MODULE_LIBRARY);
+            api->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
             return;
         }
     }
@@ -261,7 +279,7 @@ public:
     
     void preServerSpecialize(zygisk::ServerSpecializeArgs *args) override {
         // We don't need to run in system_server
-        api->setOption(zygisk::Option::DLCLOSE_MODULE_LIBRARY);
+        api->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
     }
     
 private:
