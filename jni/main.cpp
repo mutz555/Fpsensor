@@ -65,7 +65,7 @@ int my___system_property_get(const char *name, char *value) {
 
 class MyModule : public zygisk::ModuleBase {
 public:
-    void onLoad(zygisk::Api *api) override {
+    void onLoad(zygisk::Api *api, JNIEnv *env) override {
         if (!should_spoof()) return;
 
         xhook_register(".*", "__system_property_get",
