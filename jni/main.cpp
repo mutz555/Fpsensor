@@ -124,10 +124,11 @@ static const char *get_process_name() {
 
 // Convert jstring to C string
 static const char *jstring_to_cstr(JNIEnv *env, jstring jstr) {
-    if (!jstr) return nullptr;
+    if (!env || !jstr) return nullptr;
     const char *str = env->GetStringUTFChars(jstr, nullptr);
     if (str) {
         strncpy(process_name, str, sizeof(process_name) - 1);
+        process_name[sizeof(process_name) - 1] = '\0'; // Ensure null termination
         env->ReleaseStringUTFChars(jstr, str);
         return process_name;
     }
@@ -226,6 +227,7 @@ public:
     void onLoad(zygisk::Api *api, JNIEnv *env) override {
         // Save API reference
         this->api = api;
+        this->env = env;
         LOGI("SnapdragonSpoof module loaded");
     }
 
@@ -233,9 +235,10 @@ public:
         // Check if we should enable for this app
         const char *process = nullptr;
 
-        // Get process name from JNI args
+        // Get process name from JNI args - access via reference
+        JNIEnv *env = api->getJNIEnv();
         if (args->nice_name) {
-            process = jstring_to_cstr(args->env, args->nice_name);
+            process = jstring_to_cstr(env, args->nice_name);
         }
 
         // If nice_name is not available, try to get from cmdline
@@ -254,7 +257,7 @@ public:
 
         if (!enable_spoof) {
             // Not a target app, exempt the process
-            api->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
+            api->setOption(0); // DLCLOSE_MODULE_LIBRARY value is 0
             return;
         }
     }
@@ -266,14 +269,20 @@ public:
         LOGI("Installing hooks for %s", process_name);
 
         // Register hooks
-        xhook_register(".*libc\\.so$", "__system_property_get", 
-                     (void*)my___system_property_get, (void**)&orig___system_property_get);
+        if (xhook_register(".*libc\\.so$", "__system_property_get", 
+                     (void*)my___system_property_get, (void**)&orig___system_property_get) != 0) {
+            LOGE("Failed to register hook for __system_property_get");
+        }
 
-        xhook_register(".*libc\\.so$", "__system_property_read", 
-                     (void*)my___system_property_read, (void**)&orig___system_property_read);
+        if (xhook_register(".*libc\\.so$", "__system_property_read", 
+                     (void*)my___system_property_read, (void**)&orig___system_property_read) != 0) {
+            LOGE("Failed to register hook for __system_property_read");
+        }
 
-        xhook_register(".*libc\\.so$", "__system_property_read_callback", 
-                     (void*)my___system_property_read_callback, (void**)&orig___system_property_read_callback);
+        if (xhook_register(".*libc\\.so$", "__system_property_read_callback", 
+                     (void*)my___system_property_read_callback, (void**)&orig___system_property_read_callback) != 0) {
+            LOGE("Failed to register hook for __system_property_read_callback");
+        }
 
         // Apply hooks
         int ret = xhook_refresh(0);
@@ -285,11 +294,12 @@ public:
 
     void preServerSpecialize(zygisk::ServerSpecializeArgs *args) override {
         // We don't need to run in system_server
-        api->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
+        api->setOption(0); // DLCLOSE_MODULE_LIBRARY value is 0
     }
 
 private:
     zygisk::Api *api;
+    JNIEnv *env;
 };
 
 REGISTER_ZYGISK_MODULE(SnapdragonSpoofer)
