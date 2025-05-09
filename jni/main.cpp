@@ -47,6 +47,9 @@ static const char *target_packages[] = {
     "com.riotgames.tacticiansandroid" // Teamfight Tactics
 };
 
+// Hitung jumlah target package
+static const size_t target_packages_count = sizeof(target_packages) / sizeof(target_packages[0]);
+
 // Snapdragon 8 Gen 3 (SM8650/Kalama) properties
 static const char *spoofed_props[][2] = {
     // Basic SoC information
@@ -56,7 +59,7 @@ static const char *spoofed_props[][2] = {
     {"ro.soc.model", "SM8650"},
     {"ro.product.board", "kalama"},
     {"ro.chipname", "SM8650"},
-    
+
     // CPU information
     {"ro.qualcomm.soc", "sm8650"},
     {"ro.arch", "arm64"},
@@ -65,31 +68,34 @@ static const char *spoofed_props[][2] = {
     {"ro.cpu.cluster1", "3.2GHz"}, // Performance cores
     {"ro.cpu.cluster2", "3.0GHz"}, // Mid cores
     {"ro.cpu.cluster3", "2.3GHz"}, // Efficiency cores
-    
+
     // GPU information
     {"ro.gpu.model", "Adreno 750"},
     {"ro.gpu.vendor", "Qualcomm"},
     {"ro.gpu.frequency", "1000MHz"},
-    
+
     // Memory information
     {"ro.hardware.memory", "LPDDR5X"},
     {"ro.memory.speed", "4800MHz"},
-    
+
     // Hardware features
     {"ro.hardware.chipset", "Snapdragon 8 Gen 3"},
     {"ro.qualcomm.version", "SM8650-AC"},
-    
+
     // Qualcomm features
     {"ro.hardware.vulkan", "adreno"},
     {"ro.hardware.egl", "adreno"},
     {"ro.opengles.version", "196610"}, // OpenGL ES 3.2
     {"ro.hardware.audio", "lito"},
     {"ro.hardware.sensors", "kalama"},
-    
+
     // Build properties
     {"ro.build.description", "SM8650-kalama-user 14 UKQ1.230930.001 eng.user.20240213.144736 release-keys"},
     {"ro.build.fingerprint", "qcom/kalama/kalama:14/UKQ1.230930.001/20240213.144736:user/release-keys"}
 };
+
+// Hitung jumlah spoofed properties
+static const size_t spoofed_props_count = sizeof(spoofed_props) / sizeof(spoofed_props[0]);
 
 // Original function pointers
 static int (*orig___system_property_get)(const char *name, char *value) = nullptr;
@@ -131,10 +137,10 @@ static const char *jstring_to_cstr(JNIEnv *env, jstring jstr) {
 // Check if we should spoof for this process
 static bool should_spoof() {
     if (enable_spoof) return true;
-    
+
     const char *proc = get_process_name();
-    for (const char *pkg : target_packages) {
-        if (strstr(proc, pkg)) {
+    for (size_t i = 0; i < target_packages_count; i++) {
+        if (strstr(proc, target_packages[i])) {
             LOGI("Matched target package: %s", proc);
             enable_spoof = true;
             return true;
@@ -145,9 +151,9 @@ static bool should_spoof() {
 
 // Find spoofed property value
 static bool find_spoofed_prop(const char *name, char *value) {
-    for (auto &pair : spoofed_props) {
-        if (strcmp(name, pair[0]) == 0) {
-            strcpy(value, pair[1]);
+    for (size_t i = 0; i < spoofed_props_count; i++) {
+        if (strcmp(name, spoofed_props[i][0]) == 0) {
+            strcpy(value, spoofed_props[i][1]);
             return true;
         }
     }
@@ -186,16 +192,16 @@ struct CallbackInfo {
 
 static void callback_wrapper(void *cookie, const char *name, const char *value, uint32_t serial) {
     CallbackInfo *info = static_cast<CallbackInfo*>(cookie);
-    
+
     // Check if we need to spoof
     char spoofed_value[PROP_VALUE_MAX];
     const char *final_value = value;
-    
+
     if (should_spoof() && find_spoofed_prop(name, spoofed_value)) {
         final_value = spoofed_value;
         LOGI("Spoofed property callback: %s -> %s", name, final_value);
     }
-    
+
     // Call original callback with potentially spoofed value
     info->orig_callback(info->orig_cookie, name, final_value, serial);
     delete info;
@@ -209,7 +215,7 @@ extern "C" int my___system_property_read_callback(const prop_info *pi,
     if (!should_spoof()) {
         return orig___system_property_read_callback(pi, callback, cookie);
     }
-    
+
     // Create wrapper information
     CallbackInfo *info = new CallbackInfo{callback, cookie};
     return orig___system_property_read_callback(pi, callback_wrapper, info);
@@ -222,78 +228,68 @@ public:
         this->api = api;
         LOGI("SnapdragonSpoof module loaded");
     }
-    
+
     void preAppSpecialize(zygisk::AppSpecializeArgs *args) override {
         // Check if we should enable for this app
         const char *process = nullptr;
-        
+
         // Get process name from JNI args
         if (args->nice_name) {
             process = jstring_to_cstr(args->env, args->nice_name);
         }
-        
+
         // If nice_name is not available, try to get from cmdline
         if (!process || process[0] == '\0') {
             get_process_name();
             process = process_name;
         }
-        
-        for (const char *pkg : target_packages) {
-            if (strstr(process_name, pkg)) {
+
+        for (size_t i = 0; i < target_packages_count; i++) {
+            if (strstr(process_name, target_packages[i])) {
                 LOGI("Target app detected: %s", process_name);
                 enable_spoof = true;
                 break;
             }
         }
-        
+
         if (!enable_spoof) {
             // Not a target app, exempt the process
             api->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
             return;
         }
     }
-    
+
     void postAppSpecialize(const zygisk::AppSpecializeArgs *args) override {
         if (!enable_spoof) return;
-        
+
         // Set up hooks only if we're in a target process
         LOGI("Installing hooks for %s", process_name);
-        
+
         // Register hooks
         xhook_register(".*libc\\.so$", "__system_property_get", 
                      (void*)my___system_property_get, (void**)&orig___system_property_get);
-        
+
         xhook_register(".*libc\\.so$", "__system_property_read", 
                      (void*)my___system_property_read, (void**)&orig___system_property_read);
-        
+
         xhook_register(".*libc\\.so$", "__system_property_read_callback", 
                      (void*)my___system_property_read_callback, (void**)&orig___system_property_read_callback);
-        
+
         // Apply hooks
         int ret = xhook_refresh(0);
         LOGI("xhook_refresh returned: %d", ret);
-        
+
         xhook_clear();
         LOGI("Spoof hook injection completed!");
     }
-    
+
     void preServerSpecialize(zygisk::ServerSpecializeArgs *args) override {
         // We don't need to run in system_server
         api->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
     }
-    
+
 private:
     zygisk::Api *api;
 };
 
 REGISTER_ZYGISK_MODULE(SnapdragonSpoofer)
-
-// Static instance of our module
-static SnapdragonSpoofer moduleInstance;
-
-// Explicit entry point untuk memastikan modul dikenali oleh Zygisk
-extern "C" __attribute__((visibility("default")))
-zygisk::ModuleBase *zygisk_module_entry() {
-    LOGI("zygisk_module_entry called - providing module instance");
-    return &moduleInstance;
-}
