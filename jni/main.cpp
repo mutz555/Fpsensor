@@ -26,7 +26,7 @@ static const char *spoofed_props[][2] = {
     {"ro.chipname", "SM8650"}
 };
 
-static const char *(*orig___system_property_get)(const char *name, char *value);
+static int (*orig___system_property_get)(const char *name, char *value);
 
 static const char *get_process_name() {
     static char name[256] = {};
@@ -65,7 +65,7 @@ int my___system_property_get(const char *name, char *value) {
 
 class MyModule : public zygisk::ModuleBase {
 public:
-    void onLoad(zygisk::Api *api, zygisk::Process *process) override {
+    void onLoad(zygisk::Api *api) override {
         if (!should_spoof()) return;
 
         xhook_register(".*", "__system_property_get",
