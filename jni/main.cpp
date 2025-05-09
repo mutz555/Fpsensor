@@ -12,6 +12,28 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "[SpoofModule]", __VA_ARGS__)
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, "[SpoofModule]", __VA_ARGS__)
 
+
+static FILE* (*original_fopen)(const char* path, const char* mode) = nullptr;
+
+const char* fake_cpuinfo =
+    "Processor\t: ARMv8 Processor rev 0 (v8l)\n"
+    "Hardware\t: Qualcomm SM8550\n"
+    "Model name\t: Snapdragon 8 Gen 2\n"
+    "Features\t: fp asimd aes pmull sha1 sha2 crc32\n"
+    "CPU implementer\t: 0x51\n"
+    "CPU architecture: 8\n"
+    "CPU variant\t: 0x0\n"
+    "CPU part\t: 0x803\n"
+    "CPU revision\t: 4\n";
+
+FILE* my_fopen(const char* path, const char* mode) {
+    if (strcmp(path, "/proc/cpuinfo") == 0) {
+        LOGI("Spoofed /proc/cpuinfo via fmemopen.");
+        return fmemopen((void*)fake_cpuinfo, strlen(fake_cpuinfo), "r");
+    }
+    return original_fopen(path, mode);
+}
+
 static int (*original_system_property_get)(const char*, char*, size_t) = nullptr;
 
 // Map properti spoof
@@ -94,7 +116,8 @@ void* hook_thread_func(void* arg) {
         LOGE("xhook gagal diterapkan: %d", ret);
         
         // Coba refresh sekali lagi dengan mode asinkron
-        ret = xhook_refresh(0);
+        ret = xhook_register("libc.so", "fopen", (void*)my_fopen, (void**)&original_fopen);
+    xhook_refresh(0);
         if (ret == 0) {
             LOGI("xhook berhasil diterapkan (mode asinkron)");
             hook_initialized = true;
