@@ -1,6 +1,7 @@
 #include <jni.h>
 #include <cstring>
 #include <string>
+#include <map>
 #include <android/log.h>
 #include "xhook.h"
 #include <sys/system_properties.h>
@@ -10,36 +11,28 @@
 
 static int (*original_system_property_get)(const char*, char*, size_t) = nullptr;
 
+// Map properti spoof
+static std::map<std::string, std::string> spoof_props = {
+    {"ro.product.model",        "SM-S928B"},
+    {"ro.product.brand",        "samsung"},
+    {"ro.product.manufacturer", "samsung"},
+    {"ro.product.device",       "gts8q"},
+    {"ro.product.name",         "gts8qxx"},
+    {"ro.product.board",        "kalama"},
+    {"ro.build.product",        "kalama"},
+    {"ro.board.platform",       "kalama"},
+    {"ro.hardware",             "qcom"},
+    {"ro.hardware.chipname",    "SM8550-AC"},
+    {"ro.soc.manufacturer",     "Qualcomm"},
+    {"ro.soc.model",            "SM8550-AC"},
+    {"ro.build.fingerprint",    "samsung/gts8qxx/gts8q:14/UKQ1.240314.002/S928BXXU1AXCA:user/release-keys"}
+};
+
 int my_system_property_get(const char* name, char* value, size_t value_len) {
-    if (strcmp(name, "ro.product.model") == 0) {
-        strlcpy(value, "SM-S928B", value_len);
-        return strlen(value);
-    } else if (strcmp(name, "ro.product.brand") == 0) {
-        strlcpy(value, "samsung", value_len);
-        return strlen(value);
-    } else if (strcmp(name, "ro.product.manufacturer") == 0) {
-        strlcpy(value, "samsung", value_len);
-        return strlen(value);
-    } else if (strcmp(name, "ro.product.device") == 0) {
-        strlcpy(value, "gts8q", value_len);
-        return strlen(value);
-    } else if (strcmp(name, "ro.board.platform") == 0) {
-        strlcpy(value, "kalama", value_len);
-        return strlen(value);
-    } else if (strcmp(name, "ro.hardware.chipname") == 0) {
-        strlcpy(value, "SM8550", value_len);
-        return strlen(value);
-    } else if (strcmp(name, "ro.hardware") == 0) {
-        strlcpy(value, "qcom", value_len);
-        return strlen(value);
-    } else if (strcmp(name, "ro.build.product") == 0) {
-        strlcpy(value, "kalama", value_len);
-        return strlen(value);
-    } else if (strcmp(name, "ro.product.board") == 0) {
-        strlcpy(value, "kalama", value_len);
-        return strlen(value);
-    } else if (strcmp(name, "ro.chipname") == 0) {
-        strlcpy(value, "SM8550", value_len);
+    auto it = spoof_props.find(name);
+    if (it != spoof_props.end()) {
+        strlcpy(value, it->second.c_str(), value_len);
+        LOGI("Spoofed: %s => %s", name, value);
         return strlen(value);
     }
 
