@@ -80,5 +80,9 @@ public:
 
 REGISTER_ZYGISK_MODULE(MyModule)
 
-extern "C" __attribute__((used, visibility("default")))
-zygisk::ModuleBase *zygisk_module = new MyModule();
+static MyModule moduleInstance;
+
+extern "C" __attribute__((visibility("default")))
+zygisk::ModuleBase *zygisk_module_entry() {
+    return &moduleInstance;
+}
