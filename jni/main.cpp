@@ -222,83 +222,52 @@ extern "C" int my___system_property_read_callback(const prop_info *pi,
     return orig___system_property_read_callback(pi, callback_wrapper, info);
 }
 
-class SnapdragonSpoofer : public zygisk::ModuleBase {
-public:
-    void onLoad(zygisk::Api *api, JNIEnv *env) override {
-        // Save API reference
-        this->api = api;
-        this->env = env;
-        LOGI("SnapdragonSpoof module loaded");
-    }
+// Menginisialisasi spoofer
+extern "C" void init_snapdragon_spoof() {
+    LOGI("Initializing Snapdragon Spoofer");
+    // Inisialisasi kode dapat ditambahkan di sini
+}
 
-    void preAppSpecialize(zygisk::AppSpecializeArgs *args) override {
-        // Check if we should enable for this app
-        const char *process = nullptr;
-
-        // Get process name from JNI args - access via reference
-        if (args->nice_name) {
-            process = jstring_to_cstr(env, args->nice_name);
-        }
-
-        // If nice_name is not available, try to get from cmdline
-        if (!process || process[0] == '\0') {
-            get_process_name();
-            process = process_name;
-        }
-
-        for (size_t i = 0; i < target_packages_count; i++) {
-            if (strstr(process_name, target_packages[i])) {
-                LOGI("Target app detected: %s", process_name);
-                enable_spoof = true;
-                break;
-            }
-        }
-
-        if (!enable_spoof) {
-            // Not a target app, exempt the process
-            api->setOption(0); // DLCLOSE_MODULE_LIBRARY value is 0
-            return;
+// Fungsi untuk mengecek apakah suatu proses adalah target dan menerapkan hook jika ya
+extern "C" void apply_hooks_if_target_app(const char* process_name) {
+    LOGI("Checking if target app: %s", process_name);
+    
+    // Cek apakah proses ini adalah target
+    for (size_t i = 0; i < target_packages_count; i++) {
+        if (strstr(process_name, target_packages[i])) {
+            LOGI("Target app detected: %s", process_name);
+            enable_spoof = true;
+            break;
         }
     }
-
-    void postAppSpecialize(const zygisk::AppSpecializeArgs *args) override {
-        if (!enable_spoof) return;
-
-        // Set up hooks only if we're in a target process
-        LOGI("Installing hooks for %s", process_name);
-
-        // Register hooks
-        if (xhook_register(".*libc\\.so$", "__system_property_get", 
-                     (void*)my___system_property_get, (void**)&orig___system_property_get) != 0) {
-            LOGE("Failed to register hook for __system_property_get");
-        }
-
-        if (xhook_register(".*libc\\.so$", "__system_property_read", 
-                     (void*)my___system_property_read, (void**)&orig___system_property_read) != 0) {
-            LOGE("Failed to register hook for __system_property_read");
-        }
-
-        if (xhook_register(".*libc\\.so$", "__system_property_read_callback", 
-                     (void*)my___system_property_read_callback, (void**)&orig___system_property_read_callback) != 0) {
-            LOGE("Failed to register hook for __system_property_read_callback");
-        }
-
-        // Apply hooks
-        int ret = xhook_refresh(0);
-        LOGI("xhook_refresh returned: %d", ret);
-
-        xhook_clear();
-        LOGI("Spoof hook injection completed!");
+    
+    if (!enable_spoof) {
+        LOGI("Not a target app, skipping");
+        return;
+    }
+    
+    LOGI("Installing hooks for %s", process_name);
+    
+    // Register hooks
+    if (xhook_register(".*libc\\.so$", "__system_property_get", 
+                 (void*)my___system_property_get, (void**)&orig___system_property_get) != 0) {
+        LOGE("Failed to register hook for __system_property_get");
     }
 
-    void preServerSpecialize(zygisk::ServerSpecializeArgs *args) override {
-        // We don't need to run in system_server
-        api->setOption(0); // DLCLOSE_MODULE_LIBRARY value is 0
+    if (xhook_register(".*libc\\.so$", "__system_property_read", 
+                 (void*)my___system_property_read, (void**)&orig___system_property_read) != 0) {
+        LOGE("Failed to register hook for __system_property_read");
     }
 
-private:
-    zygisk::Api *api;
-    JNIEnv *env;
-};
+    if (xhook_register(".*libc\\.so$", "__system_property_read_callback", 
+                 (void*)my___system_property_read_callback, (void**)&orig___system_property_read_callback) != 0) {
+        LOGE("Failed to register hook for __system_property_read_callback");
+    }
 
-REGISTER_ZYGISK_MODULE(SnapdragonSpoofer)
+    // Apply hooks
+    int ret = xhook_refresh(0);
+    LOGI("xhook_refresh returned: %d", ret);
+
+    xhook_clear();
+    LOGI("Spoof hook injection completed!");
+}
