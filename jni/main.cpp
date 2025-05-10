@@ -10,7 +10,7 @@
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-// Target packages to apply spoofing
+// Target packages to apply spoofing (use exact package names)
 static const char *target_packages[] = {
     "com.tencent.ig", "com.pubg.imobile", "com.pubg.krmobile", "com.vng.pubgmobile", "com.rekoo.pubgm",
     "com.tencent.tmgp.pubgmhd", "com.pubg.newstate", "flar2.devcheck", "com.antutu.ABenchMark",
@@ -50,19 +50,6 @@ static int (*orig___system_property_read_callback)(const prop_info *pi,
 // Per-process flag
 static bool enable_spoof = false;
 static bool hook_applied = false;
-
-// Get current process name (from /proc/self/cmdline)
-static const char *get_process_name() {
-    static char process_name[256] = {0};
-    if (process_name[0] == '\0') {
-        FILE *f = fopen("/proc/self/cmdline", "r");
-        if (f) {
-            fread(process_name, 1, sizeof(process_name) - 1, f);
-            fclose(f);
-        }
-    }
-    return process_name;
-}
 
 // Check if we should spoof for this process
 static bool should_spoof() {
@@ -141,27 +128,21 @@ extern "C" void init_snapdragon_spoof() {
 
 // Fungsi untuk mengecek dan memasang hook hanya di target
 extern "C" void apply_hooks_if_target_app(const char* process_name) {
-    LOGI("apply_hooks_if_target_app masuk: %s", process_name ? process_name : "NULL");
+    LOGI("apply_hooks_if_target_app masuk: [%s]", process_name ? process_name : "NULL");
 
     if (hook_applied) {
         LOGI("Hooks already applied for this process, skipping.");
         return;
     }
 
-    // Print HEX dari nama proses untuk debug
-    if (process_name) {
-        char hexbuf[512] = {0};
-        size_t i;
-        for (i = 0; process_name[i] && i < sizeof(hexbuf)/3-1 && i < 100; ++i)
-            sprintf(hexbuf + strlen(hexbuf), "%02X ", (unsigned char)process_name[i]);
-        LOGI("Process name HEX: %s", hexbuf);
-    }
-
-    // Cek proses target
+    // Print nama proses dan semua target untuk debug
+    LOGI("Process name: [%s]", process_name ? process_name : "NULL");
     enable_spoof = false;
+
     for (size_t i = 0; i < target_packages_count; i++) {
-        LOGI("Comparing: [%s] <-> [%s]", process_name, target_packages[i]);
-        if (process_name && strstr(process_name, target_packages[i])) {
+        LOGI("Comparing: [%s] <-> [%s]", process_name ? process_name : "NULL", target_packages[i]);
+        // Gunakan strcmp untuk pencocokan persis package name
+        if (process_name && strcmp(process_name, target_packages[i]) == 0) {
             LOGI("Target app detected: %s", process_name);
             enable_spoof = true;
             break;
@@ -190,7 +171,10 @@ extern "C" void apply_hooks_if_target_app(const char* process_name) {
     int ret = xhook_refresh(0);
     LOGI("xhook_refresh returned: %d", ret);
 
-    // Jangan panggil xhook_clear() di sini. Biarkan hook tetap aktif!
-    hook_applied = true;
-    LOGI("Spoof hook injection completed!");
+    if (ret1 != 0 || ret2 != 0 || ret3 != 0 || ret != 0) {
+        LOGE("xhook failed to install one or more hooks!");
+    } else {
+        LOGI("Spoof hook injection completed!");
+        hook_applied = true;
+    }
 }
