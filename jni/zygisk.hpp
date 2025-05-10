@@ -70,12 +70,11 @@ public:
     virtual void postServerSpecialize(const ServerSpecializeArgs *args) {}
 };
 
-void registerModule(ModuleBase *module);
-
+// ENTRY POINT ZYGISK HARUS POINTER TO POINTER DAN LINKAGE C
+#ifdef __cplusplus
+extern "C" {
+#endif
+void registerModule(zygisk::ModuleBase **module);
+#ifdef __cplusplus
 }
-
-#define REGISTER_ZYGISK_MODULE(clazz) \
-    __attribute__((constructor)) static void zygiskModuleRegister() { \
-        static clazz module; \
-        zygisk::registerModule(&module); \
-    }
+#endif
