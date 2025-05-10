@@ -1,6 +1,6 @@
 LOCAL_PATH := $(call my-dir)
 
-# Modul static library untuk xhook, masukkan SEMUA file .c yang terkait
+# Modul static library untuk xhook
 include $(CLEAR_VARS)
 LOCAL_MODULE := xhook
 LOCAL_SRC_FILES := \
@@ -13,14 +13,12 @@ LOCAL_SRC_FILES := \
     xh_version.c
 include $(BUILD_STATIC_LIBRARY)
 
-# Modul utama spoof s24
+# Modul utama Zygisk spoof s24
 include $(CLEAR_VARS)
-LOCAL_MODULE := spoofs24
-LOCAL_SRC_FILES := main.cpp / zygisk.cpp / module.cpp
+LOCAL_MODULE := zygisk_spoofs24
+LOCAL_SRC_FILES := main.cpp zygisk.cpp module.cpp
 LOCAL_STATIC_LIBRARIES := xhook
 LOCAL_LDLIBS := -llog -ldl
-LOCAL_CFLAGS += -fno-rtti -fno-exceptions -DDISABLE_DOBBY_HOOK
-LOCAL_CPPFLAGS += -std=c++17 -DNO_DOBBY_LIBRARY
-LOCAL_CFLAGS += -O0 -g
-LOCAL_CPPFLAGS += -O0 -g
+LOCAL_CFLAGS += -fno-rtti -fno-exceptions -DISABLE_DOBBY_HOOK -O0 -g
+LOCAL_CPPFLAGS += -std=c++17 -DNO_DOBBY_LIBRARY -O0 -g
 include $(BUILD_SHARED_LIBRARY)
