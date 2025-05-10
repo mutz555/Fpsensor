@@ -12,106 +12,48 @@
 
 // Target packages to apply spoofing
 static const char *target_packages[] = {
-    "com.tencent.ig",               // PUBG Mobile
-    "com.pubg.imobile",             // PUBG Mobile (India)
-    "com.pubg.krmobile",            // PUBG Mobile (Korea)
-    "com.vng.pubgmobile",           // PUBG Mobile (Vietnam)
-    "com.rekoo.pubgm",              // PUBG Mobile (Taiwan)
-    "com.tencent.tmgp.pubgmhd",     // PUBG Mobile (CN HD)
-    "com.pubg.newstate",            // PUBG New State
-    "flar2.devcheck",               // DevCheck
-    "com.antutu.ABenchMark",        // AnTuTu Benchmark
-    "com.primatelabs.geekbench",    // Geekbench
-    "com.android.vending",          // Google Play Store
-    "com.mobile.legends",           // Mobile Legends
-    "com.miHoYo.GenshinImpact",     // Genshin Impact
-    "com.miHoYo.Yuanshen",          // Genshin Impact (CN)
-    "com.miHoYo.honkaiimpact3",     // Honkai Impact 3rd
-    "com.miHoYo.bh3.global",        // Honkai Impact 3rd (Global)
-    "com.miHoYo.bh3.eur",           // Honkai Impact 3rd (Europe)
-    "com.hoyoverse.hkrpg.global",   // Honkai: Star Rail
-    "com.miHoYo.hkrpg",             // Honkai: Star Rail (CN)
-    "com.hoyoverse.hkrpgoversea",   // Honkai: Star Rail (Global)
-    "com.activision.callofduty.shooter", // Call of Duty Mobile
-    "com.garena.game.codm",         // Call of Duty Mobile (Garena)
-    "com.tencent.tmgp.cod",         // Call of Duty Mobile (CN)
-    "com.ea.gp.apexlegendsmobilefps", // Apex Legends Mobile
-    "com.epicgames.fortnite",       // Fortnite
-    "com.netease.party.m",          // Marvel Snap
-    "com.netease.marvel.marvelsuperwarglobal", // Marvel Super War
-    "com.supercell.brawlstars",     // Brawl Stars
-    "com.dts.freefireth",           // Free Fire
-    "com.dts.freefiremax",          // Free Fire MAX
-    "com.riotgames.league.wildrift", // League of Legends: Wild Rift
-    "com.riotgames.legendsofruneterra", // Legends of Runeterra
-    "com.riotgames.tacticiansandroid" // Teamfight Tactics
+    "com.tencent.ig", "com.pubg.imobile", "com.pubg.krmobile", "com.vng.pubgmobile", "com.rekoo.pubgm",
+    "com.tencent.tmgp.pubgmhd", "com.pubg.newstate", "flar2.devcheck", "com.antutu.ABenchMark",
+    "com.primatelabs.geekbench", "com.android.vending", "com.mobile.legends", "com.miHoYo.GenshinImpact",
+    "com.miHoYo.Yuanshen", "com.miHoYo.honkaiimpact3", "com.miHoYo.bh3.global", "com.miHoYo.bh3.eur",
+    "com.hoyoverse.hkrpg.global", "com.miHoYo.hkrpg", "com.hoyoverse.hkrpgoversea",
+    "com.activision.callofduty.shooter", "com.garena.game.codm", "com.tencent.tmgp.cod",
+    "com.ea.gp.apexlegendsmobilefps", "com.epicgames.fortnite", "com.netease.party.m",
+    "com.netease.marvel.marvelsuperwarglobal", "com.supercell.brawlstars", "com.dts.freefireth",
+    "com.dts.freefiremax", "com.riotgames.league.wildrift", "com.riotgames.legendsofruneterra",
+    "com.riotgames.tacticiansandroid"
 };
-
-// Hitung jumlah target package
 static const size_t target_packages_count = sizeof(target_packages) / sizeof(target_packages[0]);
 
 // Snapdragon 8 Gen 3 (SM8650/Kalama) properties
 static const char *spoofed_props[][2] = {
-    // Basic SoC information
-    {"ro.board.platform", "kalama"},
-    {"ro.hardware", "qcom"},
-    {"ro.soc.manufacturer", "Qualcomm"},
-    {"ro.soc.model", "SM8650"},
-    {"ro.product.board", "kalama"},
-    {"ro.chipname", "SM8650"},
-
-    // CPU information
-    {"ro.qualcomm.soc", "sm8650"},
-    {"ro.arch", "arm64"},
-    {"ro.cpu.core", "1+3+2+2"}, // CPU core config
-    {"ro.cpu.cluster0", "3.3GHz"}, // Prime core
-    {"ro.cpu.cluster1", "3.2GHz"}, // Performance cores
-    {"ro.cpu.cluster2", "3.0GHz"}, // Mid cores
-    {"ro.cpu.cluster3", "2.3GHz"}, // Efficiency cores
-
-    // GPU information
-    {"ro.gpu.model", "Adreno 750"},
-    {"ro.gpu.vendor", "Qualcomm"},
-    {"ro.gpu.frequency", "1000MHz"},
-
-    // Memory information
-    {"ro.hardware.memory", "LPDDR5X"},
-    {"ro.memory.speed", "4800MHz"},
-
-    // Hardware features
-    {"ro.hardware.chipset", "Snapdragon 8 Gen 3"},
-    {"ro.qualcomm.version", "SM8650-AC"},
-
-    // Qualcomm features
-    {"ro.hardware.vulkan", "adreno"},
-    {"ro.hardware.egl", "adreno"},
-    {"ro.opengles.version", "196610"}, // OpenGL ES 3.2
-    {"ro.hardware.audio", "lito"},
-    {"ro.hardware.sensors", "kalama"},
-
-    // Build properties
+    {"ro.board.platform", "kalama"}, {"ro.hardware", "qcom"}, {"ro.soc.manufacturer", "Qualcomm"},
+    {"ro.soc.model", "SM8650"}, {"ro.product.board", "kalama"}, {"ro.chipname", "SM8650"},
+    {"ro.qualcomm.soc", "sm8650"}, {"ro.arch", "arm64"}, {"ro.cpu.core", "1+3+2+2"},
+    {"ro.cpu.cluster0", "3.3GHz"}, {"ro.cpu.cluster1", "3.2GHz"}, {"ro.cpu.cluster2", "3.0GHz"},
+    {"ro.cpu.cluster3", "2.3GHz"}, {"ro.gpu.model", "Adreno 750"}, {"ro.gpu.vendor", "Qualcomm"},
+    {"ro.gpu.frequency", "1000MHz"}, {"ro.hardware.memory", "LPDDR5X"}, {"ro.memory.speed", "4800MHz"},
+    {"ro.hardware.chipset", "Snapdragon 8 Gen 3"}, {"ro.qualcomm.version", "SM8650-AC"},
+    {"ro.hardware.vulkan", "adreno"}, {"ro.hardware.egl", "adreno"}, {"ro.opengles.version", "196610"},
+    {"ro.hardware.audio", "lito"}, {"ro.hardware.sensors", "kalama"},
     {"ro.build.description", "SM8650-kalama-user 14 UKQ1.230930.001 eng.user.20240213.144736 release-keys"},
     {"ro.build.fingerprint", "qcom/kalama/kalama:14/UKQ1.230930.001/20240213.144736:user/release-keys"}
 };
-
-// Hitung jumlah spoofed properties
 static const size_t spoofed_props_count = sizeof(spoofed_props) / sizeof(spoofed_props[0]);
 
 // Original function pointers
 static int (*orig___system_property_get)(const char *name, char *value) = nullptr;
 static int (*orig___system_property_read)(const prop_info *pi, char *name, char *value) = nullptr;
-static int (*orig___system_property_read_callback)(const prop_info *pi, 
-                                              void (*callback)(void *cookie, const char *name, const char *value, uint32_t serial),
-                                              void *cookie) = nullptr;
+static int (*orig___system_property_read_callback)(const prop_info *pi,
+    void (*callback)(void *cookie, const char *name, const char *value, uint32_t serial), void *cookie) = nullptr;
 
-// Flag to determine if spoofing should be applied
+// Per-process flag
 static bool enable_spoof = false;
+static bool hook_applied = false;
 
-// Process name cache
-static char process_name[256] = {0};
-
-// Get current process name
+// Get current process name (from /proc/self/cmdline)
 static const char *get_process_name() {
+    static char process_name[256] = {0};
     if (process_name[0] == '\0') {
         FILE *f = fopen("/proc/self/cmdline", "r");
         if (f) {
@@ -122,32 +64,9 @@ static const char *get_process_name() {
     return process_name;
 }
 
-// Convert jstring to C string
-static const char *jstring_to_cstr(JNIEnv *env, jstring jstr) {
-    if (!env || !jstr) return nullptr;
-    const char *str = env->GetStringUTFChars(jstr, nullptr);
-    if (str) {
-        strncpy(process_name, str, sizeof(process_name) - 1);
-        process_name[sizeof(process_name) - 1] = '\0'; // Ensure null termination
-        env->ReleaseStringUTFChars(jstr, str);
-        return process_name;
-    }
-    return nullptr;
-}
-
 // Check if we should spoof for this process
 static bool should_spoof() {
-    if (enable_spoof) return true;
-
-    const char *proc = get_process_name();
-    for (size_t i = 0; i < target_packages_count; i++) {
-        if (strstr(proc, target_packages[i])) {
-            LOGI("Matched target package: %s", proc);
-            enable_spoof = true;
-            return true;
-        }
-    }
-    return false;
+    return enable_spoof;
 }
 
 // Find spoofed property value
@@ -194,80 +113,84 @@ struct CallbackInfo {
 static void callback_wrapper(void *cookie, const char *name, const char *value, uint32_t serial) {
     CallbackInfo *info = static_cast<CallbackInfo*>(cookie);
 
-    // Check if we need to spoof
     char spoofed_value[PROP_VALUE_MAX];
     const char *final_value = value;
-
     if (should_spoof() && find_spoofed_prop(name, spoofed_value)) {
         final_value = spoofed_value;
         LOGI("Spoofed property callback: %s -> %s", name, final_value);
     }
-
-    // Call original callback with potentially spoofed value
     info->orig_callback(info->orig_cookie, name, final_value, serial);
     delete info;
 }
 
 // Hook for __system_property_read_callback
-extern "C" int my___system_property_read_callback(const prop_info *pi, 
-                                            void (*callback)(void *cookie, const char *name, const char *value, uint32_t serial),
-                                            void *cookie) {
-    // Don't wrap if we're not spoofing
+extern "C" int my___system_property_read_callback(const prop_info *pi,
+    void (*callback)(void *cookie, const char *name, const char *value, uint32_t serial),
+    void *cookie) {
     if (!should_spoof()) {
         return orig___system_property_read_callback(pi, callback, cookie);
     }
-
-    // Create wrapper information
     CallbackInfo *info = new CallbackInfo{callback, cookie};
     return orig___system_property_read_callback(pi, callback_wrapper, info);
 }
 
-// Menginisialisasi spoofer
+// Inisialisasi spoofer
 extern "C" void init_snapdragon_spoof() {
     LOGI("Initializing Snapdragon Spoofer");
-    // Inisialisasi kode dapat ditambahkan di sini
 }
 
-// Fungsi untuk mengecek apakah suatu proses adalah target dan menerapkan hook jika ya
+// Fungsi untuk mengecek dan memasang hook hanya di target
 extern "C" void apply_hooks_if_target_app(const char* process_name) {
-    LOGI("Checking if target app: %s", process_name);
-    
-    // Cek apakah proses ini adalah target
+    LOGI("apply_hooks_if_target_app masuk: %s", process_name ? process_name : "NULL");
+
+    if (hook_applied) {
+        LOGI("Hooks already applied for this process, skipping.");
+        return;
+    }
+
+    // Print HEX dari nama proses untuk debug
+    if (process_name) {
+        char hexbuf[512] = {0};
+        size_t i;
+        for (i = 0; process_name[i] && i < sizeof(hexbuf)/3-1 && i < 100; ++i)
+            sprintf(hexbuf + strlen(hexbuf), "%02X ", (unsigned char)process_name[i]);
+        LOGI("Process name HEX: %s", hexbuf);
+    }
+
+    // Cek proses target
+    enable_spoof = false;
     for (size_t i = 0; i < target_packages_count; i++) {
-        if (strstr(process_name, target_packages[i])) {
+        LOGI("Comparing: [%s] <-> [%s]", process_name, target_packages[i]);
+        if (process_name && strstr(process_name, target_packages[i])) {
             LOGI("Target app detected: %s", process_name);
             enable_spoof = true;
             break;
         }
     }
-    
+
     if (!enable_spoof) {
         LOGI("Not a target app, skipping");
         return;
     }
-    
+
     LOGI("Installing hooks for %s", process_name);
-    
-    // Register hooks
-    if (xhook_register(".*libc\\.so$", "__system_property_get", 
-                 (void*)my___system_property_get, (void**)&orig___system_property_get) != 0) {
-        LOGE("Failed to register hook for __system_property_get");
-    }
 
-    if (xhook_register(".*libc\\.so$", "__system_property_read", 
-                 (void*)my___system_property_read, (void**)&orig___system_property_read) != 0) {
-        LOGE("Failed to register hook for __system_property_read");
-    }
+    int ret1 = xhook_register(".*libc\\.so$", "__system_property_get",
+        (void*)my___system_property_get, (void**)&orig___system_property_get);
+    LOGI("xhook_register __system_property_get: %d", ret1);
 
-    if (xhook_register(".*libc\\.so$", "__system_property_read_callback", 
-                 (void*)my___system_property_read_callback, (void**)&orig___system_property_read_callback) != 0) {
-        LOGE("Failed to register hook for __system_property_read_callback");
-    }
+    int ret2 = xhook_register(".*libc\\.so$", "__system_property_read",
+        (void*)my___system_property_read, (void**)&orig___system_property_read);
+    LOGI("xhook_register __system_property_read: %d", ret2);
 
-    // Apply hooks
+    int ret3 = xhook_register(".*libc\\.so$", "__system_property_read_callback",
+        (void*)my___system_property_read_callback, (void**)&orig___system_property_read_callback);
+    LOGI("xhook_register __system_property_read_callback: %d", ret3);
+
     int ret = xhook_refresh(0);
     LOGI("xhook_refresh returned: %d", ret);
 
-    xhook_clear();
+    // Jangan panggil xhook_clear() di sini. Biarkan hook tetap aktif!
+    hook_applied = true;
     LOGI("Spoof hook injection completed!");
 }
