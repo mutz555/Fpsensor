@@ -57,10 +57,10 @@ jobs:
           mkdir -p module_tmp/zygisk/x86_64
           
           # Copy built libraries
-          cp -f libs/arm64-v8a/libfingerprint_bypasser.so module_tmp/zygisk/arm64-v8a/
-          cp -f libs/armeabi-v7a/libfingerprint_bypasser.so module_tmp/zygisk/armeabi-v7a/
-          cp -f libs/x86/libfingerprint_bypasser.so module_tmp/zygisk/x86/
-          cp -f libs/x86_64/libfingerprint_bypasser.so module_tmp/zygisk/x86_64/
+          cp -f libs/arm64-v8a/libzygisk_spoofs24.so module_tmp/zygisk/arm64-v8a/
+          cp -f libs/armeabi-v7a/libzygisk_spoofs24.so module_tmp/zygisk/armeabi-v7a/
+          cp -f libs/x86/libzygisk_spoofs24.so module_tmp/zygisk/x86/
+          cp -f libs/x86_64/libzygisk_spoofs24.so module_tmp/zygisk/x86_64/
           
           # Copy module files
           cp -f module.prop module_tmp/
@@ -82,4 +82,4 @@ jobs:
         uses: actions/upload-artifact@main
         with:
           name: so_libraries_debug
-          path: libs/*/libfingerprint_bypasser.so
+          path: libs/*/libzygisk_spoofs24.so
