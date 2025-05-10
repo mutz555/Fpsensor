@@ -70,7 +70,9 @@ public:
     virtual void postServerSpecialize(const ServerSpecializeArgs *args) {}
 };
 
-// ENTRY POINT ZYGISK HARUS POINTER TO POINTER DAN LINKAGE C
+} // <--- TUTUP namespace zygisk HARUS DISINI
+
+// ---- ENTRY POINT ZYGISK WAJIB: POINTER TO POINTER DAN LINKAGE C ----
 #ifdef __cplusplus
 extern "C" {
 #endif
