@@ -70,13 +70,11 @@ public:
     virtual void postServerSpecialize(const ServerSpecializeArgs *args) {}
 };
 
-} // <--- TUTUP namespace zygisk HARUS DISINI
+} // namespace zygisk
 
-// ---- ENTRY POINT ZYGISK WAJIB: POINTER TO POINTER DAN LINKAGE C ----
-#ifdef __cplusplus
-extern "C" {
-#endif
-void registerModule(zygisk::ModuleBase **module);
-#ifdef __cplusplus
-}
-#endif
+// Macro Zygisk modern: menghasilkan zygisk_module_entry
+#define REGISTER_ZYGISK_MODULE(clazz) \
+    extern "C" void zygisk_module_entry(void* api, void* env) { \
+        static clazz module; \
+        module.onLoad(reinterpret_cast<zygisk::Api*>(api), reinterpret_cast<JNIEnv*>(env)); \
+    }
