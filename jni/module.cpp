@@ -44,10 +44,5 @@ private:
     JNIEnv *env;
 };
 
-// ---- ENTRY POINT ZYGISK WAJIB ----
-static SnapdragonSpoofModule g_module;
-
-// Untuk Zygisk modern (2023-2025): pointer to pointer
-extern "C" void registerModule(zygisk::ModuleBase **module) {
-    *module = &g_module;
-}
+// ---- ENTRY POINT ZYGISK MODERN ----
+REGISTER_ZYGISK_MODULE(SnapdragonSpoofModule)
