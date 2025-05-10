@@ -6,7 +6,7 @@
 // Deklarasi fungsi dari main.cpp yang akan dipanggil
 extern "C" {
     void init_snapdragon_spoof();
-    void apply_hooks_if_target_app(const char* process_name);
+    void apply_hooks_if_target_app(const char* package_name);
 }
 
 #define LOG_TAG "SnapdragonSpoof"
