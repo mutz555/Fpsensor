@@ -5,7 +5,6 @@
 #include <xhook.h>
 #include <sys/system_properties.h>
 #include "zygisk.hpp"
-#include "module.cpp"
 
 #define LOG_TAG "SnapdragonSpoof"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
