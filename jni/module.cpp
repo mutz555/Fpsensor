@@ -92,3 +92,4 @@ extern "C" void postAppSpecialize(const zygisk::AppSpecializeArgs* /*args*/) {
 extern "C" void preServerSpecialize(zygisk::ServerSpecializeArgs* /*args*/) {
     if (g_api) g_api->setOption(0);
 }
+REGISTER_ZYGISK_MODULE(SnapdragonSpoofModule)
