@@ -126,57 +126,56 @@ extern "C" void init_snapdragon_spoof() {
     LOGI("Initializing Snapdragon Spoofer");
 }
 
-// ... (header tetap sama)
-extern "C" void apply_hooks_if_target_app(const char* package_name);
+// Fungsi untuk mengecek dan memasang hook hanya di target
+extern "C" void apply_hooks_if_target_app(const char* process_name) {
+LOGI("apply_hooks_if_target_app masuk: [%s]", process_name ? process_name : "NULL");
 
-...
+if (hook_applied) {  
+    LOGI("Hooks already applied for this process, skipping.");  
+    return;  
+}  
 
-extern "C" void apply_hooks_if_target_app(const char* package_name) {
-    LOGI("apply_hooks_if_target_app masuk: [%s]", package_name ? package_name : "NULL");
+// Print nama proses dan semua target untuk debug  
+LOGI("Process name: [%s]", process_name ? process_name : "NULL");  
+enable_spoof = false;  
 
-    if (hook_applied) {
-        LOGI("Hooks already applied for this process, skipping.");
-        return;
-    }
+for (size_t i = 0; i < target_packages_count; i++) {  
+    LOGI("Comparing: [%s] <-> [%s]", process_name ? process_name : "NULL", target_packages[i]);  
+    // Gunakan strcmp untuk pencocokan persis package name  
+    if (process_name && strcmp(process_name, target_packages[i]) == 0) {  
+        LOGI("Target app detected: %s", process_name);  
+        enable_spoof = true;  
+        break;  
+    }  
+}  
 
-    LOGI("Package name: [%s]", package_name ? package_name : "NULL");
-    enable_spoof = false;
+if (!enable_spoof) {  
+    LOGI("Not a target app, skipping");  
+    return;  
+}  
 
-    for (size_t i = 0; i < target_packages_count; i++) {
-        LOGI("Comparing: [%s] <-> [%s]", package_name ? package_name : "NULL", target_packages[i]);
-        if (package_name && strcmp(package_name, target_packages[i]) == 0) {
-            LOGI("Target package detected: %s", package_name);
-            enable_spoof = true;
-            break;
-        }
-    }
+LOGI("Installing hooks for %s", process_name);  
 
-    if (!enable_spoof) {
-        LOGI("Not a target package, skipping");
-        return;
-    }
+int ret1 = xhook_register(".*libc\\.so$", "__system_property_get",  
+    (void*)my___system_property_get, (void**)&orig___system_property_get);  
+LOGI("xhook_register __system_property_get: %d", ret1);  
 
-    LOGI("Installing hooks for %s", package_name);
+int ret2 = xhook_register(".*libc\\.so$", "__system_property_read",  
+    (void*)my___system_property_read, (void**)&orig___system_property_read);  
+LOGI("xhook_register __system_property_read: %d", ret2);  
 
-    int ret1 = xhook_register(".*libc\\.so$", "__system_property_get",
-        (void*)my___system_property_get, (void**)&orig___system_property_get);
-    LOGI("xhook_register __system_property_get: %d", ret1);
+int ret3 = xhook_register(".*libc\\.so$", "__system_property_read_callback",  
+    (void*)my___system_property_read_callback, (void**)&orig___system_property_read_callback);  
+LOGI("xhook_register __system_property_read_callback: %d", ret3);  
 
-    int ret2 = xhook_register(".*libc\\.so$", "__system_property_read",
-        (void*)my___system_property_read, (void**)&orig___system_property_read);
-    LOGI("xhook_register __system_property_read: %d", ret2);
+int ret = xhook_refresh(0);  
+LOGI("xhook_refresh returned: %d", ret);  
 
-    int ret3 = xhook_register(".*libc\\.so$", "__system_property_read_callback",
-        (void*)my___system_property_read_callback, (void**)&orig___system_property_read_callback);
-    LOGI("xhook_register __system_property_read_callback: %d", ret3);
+if (ret1 != 0 || ret2 != 0 || ret3 != 0 || ret != 0) {  
+    LOGE("xhook failed to install one or more hooks!");  
+} else {  
+    LOGI("Spoof hook injection completed!");  
+    hook_applied = true;  
+}
 
-    int ret = xhook_refresh(0);
-    LOGI("xhook_refresh returned: %d", ret);
-
-    if (ret1 != 0 || ret2 != 0 || ret3 != 0 || ret != 0) {
-        LOGE("xhook failed to install one or more hooks!");
-    } else {
-        LOGI("Spoof hook injection completed!");
-        hook_applied = true;
-    }
 }
