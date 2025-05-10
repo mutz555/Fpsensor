@@ -30,73 +30,73 @@ static const char* extract_package_name(const char* app_data_dir) {
     return nullptr;
 }
 
-// Simpan pointer global agar bisa diakses dari fungsi global
-static zygisk::Api* g_api = nullptr;
-static JNIEnv* g_env = nullptr;
-
-// --- GLOBAL HOOK FUNGSI ZYGISK (WAJIB extern "C") ---
-extern "C" void onLoad(zygisk::Api* api, JNIEnv* env) {
-    g_api = api;
-    g_env = env;
-    LOGI("SnapdragonSpoof module loaded (onLoad)");
-    init_snapdragon_spoof();
-}
-
-extern "C" void preAppSpecialize(zygisk::AppSpecializeArgs* args) {
-    if (!g_env) {
-        LOGE("JNIEnv is NULL di preAppSpecialize!");
-        return;
+// Kelas utama modul Zygisk
+class SnapdragonSpoofModule : public zygisk::ModuleBase {
+public:
+    void onLoad(zygisk::Api* api, JNIEnv* env) override {
+        LOGI("SnapdragonSpoof module loaded (onLoad)");
+        init_snapdragon_spoof();
+        g_api = api;
+        g_env = env;
     }
 
-    // Get nice_name for logging
-    const char *nice_name = nullptr;
-    if (args->nice_name) {
-        nice_name = g_env->GetStringUTFChars(args->nice_name, nullptr);
-        LOGI("preAppSpecialize: nice_name = [%s]", nice_name ? nice_name : "NULL");
-    }
+    void preAppSpecialize(zygisk::AppSpecializeArgs* args) override {
+        if (!g_env) {
+            LOGE("JNIEnv is NULL di preAppSpecialize!");
+            return;
+        }
 
-    // Get app_data_dir to extract package name
-    const char *app_data_dir = nullptr;
-    const char *package_name = nullptr;
-    if (args->app_data_dir) {
-        app_data_dir = g_env->GetStringUTFChars(args->app_data_dir, nullptr);
-        LOGI("preAppSpecialize: app_data_dir = [%s]", app_data_dir ? app_data_dir : "NULL");
+        // Get nice_name for logging
+        const char *nice_name = nullptr;
+        if (args->nice_name) {
+            nice_name = g_env->GetStringUTFChars(args->nice_name, nullptr);
+            LOGI("preAppSpecialize: nice_name = [%s]", nice_name ? nice_name : "NULL");
+        }
 
-        // Extract package name from app_data_dir
-        package_name = extract_package_name(app_data_dir);
-        if (package_name) {
-            LOGI("Extracted package name: [%s]", package_name);
-            apply_hooks_if_target_app(package_name);
+        // Get app_data_dir to extract package name
+        const char *app_data_dir = nullptr;
+        const char *package_name = nullptr;
+        if (args->app_data_dir) {
+            app_data_dir = g_env->GetStringUTFChars(args->app_data_dir, nullptr);
+            LOGI("preAppSpecialize: app_data_dir = [%s]", app_data_dir ? app_data_dir : "NULL");
+
+            // Extract package name from app_data_dir
+            package_name = extract_package_name(app_data_dir);
+            if (package_name) {
+                LOGI("Extracted package name: [%s]", package_name);
+                apply_hooks_if_target_app(package_name);
+            }
+        }
+
+        // If we couldn't extract package name from app_data_dir, try to use nice_name
+        if (!package_name && nice_name) {
+            LOGI("Falling back to nice_name as package identifier");
+            apply_hooks_if_target_app(nice_name);
+        }
+
+        // Clean up
+        if (nice_name) {
+            g_env->ReleaseStringUTFChars(args->nice_name, nice_name);
+        }
+        if (app_data_dir) {
+            g_env->ReleaseStringUTFChars(args->app_data_dir, app_data_dir);
         }
     }
 
-    // If we couldn't extract package name from app_data_dir, try to use nice_name
-    if (!package_name && nice_name) {
-        LOGI("Falling back to nice_name as package identifier");
-        apply_hooks_if_target_app(nice_name);
+    void postAppSpecialize(const zygisk::AppSpecializeArgs* /*args*/) override {
+        LOGI("postAppSpecialize dipanggil");
     }
 
-    // Clean up
-    if (nice_name) {
-        g_env->ReleaseStringUTFChars(args->nice_name, nice_name);
+    void preServerSpecialize(zygisk::ServerSpecializeArgs* /*args*/) override {
+        if (g_api) g_api->setOption(0);
     }
-    if (app_data_dir) {
-        g_env->ReleaseStringUTFChars(args->app_data_dir, app_data_dir);
-    }
-}
-
-extern "C" void postAppSpecialize(const zygisk::AppSpecializeArgs* /*args*/) {
-    LOGI("postAppSpecialize dipanggil");
-}
-
-extern "C" void preServerSpecialize(zygisk::ServerSpecializeArgs* /*args*/) {
-    if (g_api) g_api->setOption(0);
-}
-
 private:
-    zygisk::Api *api = nullptr;
-    JNIEnv *env = nullptr;
+    // Opsional: kamu bisa simpan pointer di sini jika tidak ingin pakai variabel global
 };
 
-// ---- ENTRY POINT ZYGISK MODERN ----
+// Variabel global untuk akses API/JNI jika tetap dibutuhkan
+zygisk::Api* g_api = nullptr;
+JNIEnv* g_env = nullptr;
+
+// ENTRY POINT ZYGISK
 REGISTER_ZYGISK_MODULE(SnapdragonSpoofModule)
