@@ -126,35 +126,37 @@ extern "C" void init_snapdragon_spoof() {
     LOGI("Initializing Snapdragon Spoofer");
 }
 
-// Fungsi untuk mengecek dan memasang hook hanya di target
-extern "C" void apply_hooks_if_target_app(const char* process_name) {
-    LOGI("apply_hooks_if_target_app masuk: [%s]", process_name ? process_name : "NULL");
+// ... (header tetap sama)
+extern "C" void apply_hooks_if_target_app(const char* package_name);
+
+...
+
+extern "C" void apply_hooks_if_target_app(const char* package_name) {
+    LOGI("apply_hooks_if_target_app masuk: [%s]", package_name ? package_name : "NULL");
 
     if (hook_applied) {
         LOGI("Hooks already applied for this process, skipping.");
         return;
     }
 
-    // Print nama proses dan semua target untuk debug
-    LOGI("Process name: [%s]", process_name ? process_name : "NULL");
+    LOGI("Package name: [%s]", package_name ? package_name : "NULL");
     enable_spoof = false;
 
     for (size_t i = 0; i < target_packages_count; i++) {
-        LOGI("Comparing: [%s] <-> [%s]", process_name ? process_name : "NULL", target_packages[i]);
-        // Gunakan strcmp untuk pencocokan persis package name
-        if (process_name && strcmp(process_name, target_packages[i]) == 0) {
-            LOGI("Target app detected: %s", process_name);
+        LOGI("Comparing: [%s] <-> [%s]", package_name ? package_name : "NULL", target_packages[i]);
+        if (package_name && strcmp(package_name, target_packages[i]) == 0) {
+            LOGI("Target package detected: %s", package_name);
             enable_spoof = true;
             break;
         }
     }
 
     if (!enable_spoof) {
-        LOGI("Not a target app, skipping");
+        LOGI("Not a target package, skipping");
         return;
     }
 
-    LOGI("Installing hooks for %s", process_name);
+    LOGI("Installing hooks for %s", package_name);
 
     int ret1 = xhook_register(".*libc\\.so$", "__system_property_get",
         (void*)my___system_property_get, (void**)&orig___system_property_get);
