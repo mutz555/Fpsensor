@@ -30,6 +30,10 @@ static const char* extract_package_name(const char* app_data_dir) {
     return nullptr;
 }
 
+// Variabel global untuk akses API/JNI
+zygisk::Api* g_api = nullptr;
+JNIEnv* g_env = nullptr;
+
 // Kelas utama modul Zygisk
 class SnapdragonSpoofModule : public zygisk::ModuleBase {
 public:
@@ -93,10 +97,6 @@ public:
 private:
     // Opsional: kamu bisa simpan pointer di sini jika tidak ingin pakai variabel global
 };
-
-// Variabel global untuk akses API/JNI jika tetap dibutuhkan
-zygisk::Api* g_api = nullptr;
-JNIEnv* g_env = nullptr;
 
 // ENTRY POINT ZYGISK
 REGISTER_ZYGISK_MODULE(SnapdragonSpoofModule)
