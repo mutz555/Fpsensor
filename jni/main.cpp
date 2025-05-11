@@ -65,8 +65,6 @@ static const char* get_process_name() {
     if (current_process_name[0] != '\0') {
         return current_process_name;
     }
-    
-    // Coba dapatkan dari /proc/self/cmdline
     int fd = open("/proc/self/cmdline", O_RDONLY);
     if (fd >= 0) {
         ssize_t len = read(fd, current_process_name, sizeof(current_process_name) - 1);
@@ -77,15 +75,12 @@ static const char* get_process_name() {
             return current_process_name;
         }
     }
-    
-    // Fallback ke getprogname() jika tersedia
     const char* progname = getprogname();
     if (progname) {
         strncpy(current_process_name, progname, sizeof(current_process_name) - 1);
         LOGI("Got process name from getprogname: %s", current_process_name);
         return current_process_name;
     }
-    
     LOGW("Failed to get process name");
     return "unknown";
 }
@@ -111,8 +106,6 @@ extern "C" int my_open(const char* path, int flags, ...) {
     if (should_spoof() && path && strstr(path, "property")) {
         LOGI("[%s] open() called: %s", get_process_name(), path);
     }
-    
-    // Panggil fungsi asli
     va_list args;
     va_start(args, flags);
     mode_t mode = va_arg(args, int);
@@ -122,8 +115,8 @@ extern "C" int my_open(const char* path, int flags, ...) {
 
 // Hook for __system_property_get
 extern "C" int my___system_property_get(const char *name, char *value) {
+    LOGI("HOOKED: __system_property_get(%s) dipanggil", name);
     int ret = orig___system_property_get(name, value);
-    
     if (should_spoof()) {
         if (find_spoofed_prop(name, value)) {
             LOGI("[%s] Spoofed property get: %s -> %s", get_process_name(), name, value);
@@ -135,8 +128,8 @@ extern "C" int my___system_property_get(const char *name, char *value) {
 
 // Hook for __system_property_read
 extern "C" int my___system_property_read(const prop_info *pi, char *name, char *value) {
+    LOGI("HOOKED: __system_property_read(%s) dipanggil", name);
     int ret = orig___system_property_read(pi, name, value);
-    
     if (should_spoof() && ret > 0) {
         char spoofed_value[PROP_VALUE_MAX];
         if (find_spoofed_prop(name, spoofed_value)) {
@@ -155,7 +148,6 @@ struct CallbackInfo {
 
 static void callback_wrapper(void *cookie, const char *name, const char *value, uint32_t serial) {
     CallbackInfo *info = static_cast<CallbackInfo*>(cookie);
-
     char spoofed_value[PROP_VALUE_MAX];
     const char *final_value = value;
     if (should_spoof() && find_spoofed_prop(name, spoofed_value)) {
@@ -170,6 +162,7 @@ static void callback_wrapper(void *cookie, const char *name, const char *value, 
 extern "C" int my___system_property_read_callback(const prop_info *pi,
     void (*callback)(void *cookie, const char *name, const char *value, uint32_t serial),
     void *cookie) {
+    LOGI("HOOKED: __system_property_read_callback dipanggil");
     if (!should_spoof()) {
         return orig___system_property_read_callback(pi, callback, cookie);
     }
@@ -182,87 +175,97 @@ static bool check_if_target_process(const char* process_name) {
     if (!process_name || strlen(process_name) == 0) {
         process_name = get_process_name();
     }
-    
     LOGI("Checking if target: [%s]", process_name);
-    
     for (size_t i = 0; i < target_packages_count; i++) {
         if (strcmp(process_name, target_packages[i]) == 0) {
             LOGI("Target app matched exactly: %s", process_name);
             return true;
         }
-        
-        // Coba juga dengan pencocokan sebagian
         if (strstr(process_name, target_packages[i]) != NULL) {
             LOGI("Target app matched partially: %s contains %s", process_name, target_packages[i]);
             return true;
         }
     }
-    
     return false;
 }
 
-// Inisialisasi xhook dan menerapkan hook
+// Inisialisasi xhook dan menerapkan hook (pattern luas)
 static bool apply_hooks() {
     if (hook_applied) {
         LOGI("Hooks already applied, skipping");
         return true;
     }
-    
     LOGI("Installing hooks for process: %s", get_process_name());
-    
-    // Hapus semua hook yang mungkin ada sebelumnya
     xhook_clear();
-    
-    // Pasang hook untuk properti system
-    int ret1 = xhook_register(".*libc\\.so$", "__system_property_get",
+
+    // Pattern luas: semua .so dan semua libc
+    const char* pattern_so = ".*\\.so$";
+    const char* pattern_libc = ".*libc.*\\.so$";
+
+    int ret1 = xhook_register(pattern_so, "__system_property_get",
         (void*)my___system_property_get, (void**)&orig___system_property_get);
-    LOGI("xhook __system_property_get: %d", ret1);
-    
-    int ret2 = xhook_register(".*libc\\.so$", "__system_property_read",
+    LOGI("xhook __system_property_get (all .so): %d", ret1);
+
+    int ret1b = xhook_register(pattern_libc, "__system_property_get",
+        (void*)my___system_property_get, (void**)&orig___system_property_get);
+    LOGI("xhook __system_property_get (libc.*.so): %d", ret1b);
+
+    int ret2 = xhook_register(pattern_so, "__system_property_read",
         (void*)my___system_property_read, (void**)&orig___system_property_read);
-    LOGI("xhook __system_property_read: %d", ret2);
-    
-    int ret3 = xhook_register(".*libc\\.so$", "__system_property_read_callback",
+    LOGI("xhook __system_property_read (all .so): %d", ret2);
+
+    int ret2b = xhook_register(pattern_libc, "__system_property_read",
+        (void*)my___system_property_read, (void**)&orig___system_property_read);
+    LOGI("xhook __system_property_read (libc.*.so): %d", ret2b);
+
+    int ret3 = xhook_register(pattern_so, "__system_property_read_callback",
         (void*)my___system_property_read_callback, (void**)&orig___system_property_read_callback);
-    LOGI("xhook __system_property_read_callback: %d", ret3);
-    
-    // Hook open() untuk debug
-    int ret4 = xhook_register(".*libc\\.so$", "open", 
+    LOGI("xhook __system_property_read_callback (all .so): %d", ret3);
+
+    int ret3b = xhook_register(pattern_libc, "__system_property_read_callback",
+        (void*)my___system_property_read_callback, (void**)&orig___system_property_read_callback);
+    LOGI("xhook __system_property_read_callback (libc.*.so): %d", ret3b);
+
+    // (Opsional) Hook open() untuk debug
+    int ret4 = xhook_register(pattern_so, "open",
         (void*)my_open, (void**)&orig_open);
-    LOGI("xhook open: %d", ret4);
-    
+    LOGI("xhook open (all .so): %d", ret4);
+
+    int ret4b = xhook_register(pattern_libc, "open",
+        (void*)my_open, (void**)&orig_open);
+    LOGI("xhook open (libc.*.so): %d", ret4b);
+
     // Refresh hook
     int ret = xhook_refresh(0);
     LOGI("xhook_refresh returned: %d", ret);
-    
+
     // Cek status
-    bool success = (ret1 == 0 && ret2 == 0 && ret3 == 0 && ret == 0);
-    
+    bool success = (ret1 == 0 || ret1b == 0) &&
+                   (ret2 == 0 || ret2b == 0) &&
+                   (ret3 == 0 || ret3b == 0) &&
+                   (ret == 0);
+
     if (success) {
         LOGI("Spoof hook injection completed successfully!");
         hook_applied = true;
     } else {
         LOGE("Failed to apply one or more hooks!");
-        if (ret1 != 0) LOGE("__system_property_get hook failed: %d", ret1);
-        if (ret2 != 0) LOGE("__system_property_read hook failed: %d", ret2);
-        if (ret3 != 0) LOGE("__system_property_read_callback hook failed: %d", ret3);
-        if (ret4 != 0) LOGE("open hook failed: %d", ret4);
+        if (ret1 != 0 && ret1b != 0) LOGE("__system_property_get hook failed: %d %d", ret1, ret1b);
+        if (ret2 != 0 && ret2b != 0) LOGE("__system_property_read hook failed: %d %d", ret2, ret2b);
+        if (ret3 != 0 && ret3b != 0) LOGE("__system_property_read_callback hook failed: %d %d", ret3, ret3b);
+        if (ret4 != 0 && ret4b != 0) LOGE("open hook failed: %d %d", ret4, ret4b);
         if (ret != 0) LOGE("xhook_refresh failed: %d", ret);
     }
-    
     return success;
 }
 
 // Inisialisasi spoofer
 extern "C" void init_snapdragon_spoof() {
     LOGI("Initializing Snapdragon Spoofer");
-    
-    // Log info versi Android
     char sdk_ver[PROP_VALUE_MAX] = {0};
     __system_property_get("ro.build.version.sdk", sdk_ver);
     LOGI("Android SDK version: %s", sdk_ver);
-    
-    // Cek library yang di-load
+
     LOGI("Checking loaded libraries");
     FILE* maps = fopen("/proc/self/maps", "r");
     if (maps) {
@@ -274,8 +277,6 @@ extern "C" void init_snapdragon_spoof() {
         }
         fclose(maps);
     }
-    
-    // Coba deteksi proses langsung
     const char* proc_name = get_process_name();
     if (check_if_target_process(proc_name)) {
         LOGI("Target process detected during init: %s", proc_name);
@@ -287,32 +288,21 @@ extern "C" void init_snapdragon_spoof() {
 // Fungsi untuk mengecek dan memasang hook hanya di target
 extern "C" void apply_hooks_if_target_app(const char* process_name) {
     LOGI("apply_hooks_if_target_app called: [%s]", process_name ? process_name : "NULL");
-    
-    // Simpan nama proses jika valid
     if (process_name && strlen(process_name) > 0) {
         strncpy(current_process_name, process_name, sizeof(current_process_name) - 1);
     }
-    
-    // Cek apakah aplikasi target
     bool is_target = check_if_target_process(process_name);
-    
     if (!is_target) {
         LOGI("Not a target app, skipping: %s", process_name ? process_name : "NULL");
         return;
     }
-    
-    // Aktifkan spoof dan pasang hook
     enable_spoof = true;
     apply_hooks();
-    
-    // Verifikasi dengan membaca beberapa properti
     if (enable_spoof && hook_applied) {
         LOGI("Verifying hook effectiveness");
-        
         char value[PROP_VALUE_MAX];
         __system_property_get("ro.hardware.chipset", value);
         LOGI("Test read ro.hardware.chipset: %s", value);
-        
         __system_property_get("ro.board.platform", value);
         LOGI("Test read ro.board.platform: %s", value);
     }
