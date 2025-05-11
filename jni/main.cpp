@@ -28,9 +28,15 @@ static const char *target_packages[] = {
 };
 static const size_t target_packages_count = sizeof(target_packages) / sizeof(target_packages[0]);
 
-// HANYA spoof chipset!
+// Spoof semua properti SoC yang umum diakses aplikasi hardware info
 static const char *spoofed_props[][2] = {
-    {"ro.hardware.chipset", "Snapdragon 8 Gen 3"}
+    {"ro.hardware.chipset", "Snapdragon 8 Gen 3"},
+    {"ro.hardware.chipname", "SM8650-AC"},
+    {"ro.chipname", "SM8650-AC"},
+    {"ro.soc.model", "SM8650"},
+    {"ro.soc.manufacturer", "Qualcomm"},
+    {"ro.vendor.soc.model.external_name", "SM8650-AC"},
+    {"ro.vendor.soc.model.part_name", "SM8650-AC"}
 };
 static const size_t spoofed_props_count = sizeof(spoofed_props) / sizeof(spoofed_props[0]);
 
@@ -219,8 +225,11 @@ extern "C" void apply_hooks_if_target_app(const char* process_name) {
     apply_hooks();
     if (hook_applied) {
         LOGI("Verifying hook effectiveness");
-        char value[PROP_VALUE_MAX];
-        __system_property_get("ro.hardware.chipset", value);
-        LOGI("Test read ro.hardware.chipset: %s", value);
+        // Cek semua properti yang di-spoof
+        for (size_t i = 0; i < spoofed_props_count; ++i) {
+            char value[PROP_VALUE_MAX] = {0};
+            __system_property_get(spoofed_props[i][0], value);
+            LOGI("Test read %s: %s", spoofed_props[i][0], value);
+        }
     }
 }
