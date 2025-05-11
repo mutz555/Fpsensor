@@ -23,28 +23,32 @@ public:
         init_snapdragon_spoof();
     }
 
+    // Dipanggil sebelum proses app dispecialize
     void preAppSpecialize(zygisk::AppSpecializeArgs *args) override {
         if (!env) {
             LOGE("JNIEnv is NULL di preAppSpecialize!");
             return;
         }
-        const char *process = nullptr;  
-    if (args->nice_name) {  
-        process = env->GetStringUTFChars(args->nice_name, nullptr);  
-        LOGI("preAppSpecialize: nice_name = [%s]", process ? process : "NULL");  
-        apply_hooks_if_target_app(process);  
-        env->ReleaseStringUTFChars(args->nice_name, process);  
-    } else {  
-        LOGI("preAppSpecialize: nice_name NULL");  
-    }  
-}
+        // Ambil nama proses dari nice_name (biasanya berisi package name)
+        const char *process = nullptr;
+        if (args->nice_name) {
+            process = env->GetStringUTFChars(args->nice_name, nullptr);
+            LOGI("preAppSpecialize: nice_name = [%s]", process ? process : "NULL");
+            // Panggil fungsi hook dari main.cpp hanya jika proses terdaftar sebagai target
+            apply_hooks_if_target_app(process);
+            env->ReleaseStringUTFChars(args->nice_name, process);
+        } else {
+            LOGI("preAppSpecialize: nice_name NULL");
+        }
+    }
 
     void postAppSpecialize(const zygisk::AppSpecializeArgs *args) override {
         LOGI("postAppSpecialize dipanggil");
     }
 
     void preServerSpecialize(zygisk::ServerSpecializeArgs *args) override {
-        if (api) api->setOption(0);
+        // Contoh: gunakan enum yang benar, misal FORCE_DENYLIST_UNMOUNT
+        if (api) api->setOption(zygisk::FORCE_DENYLIST_UNMOUNT);
     }
 
 private:
