@@ -45,47 +45,44 @@ public:
     }
 
     void preAppSpecialize(zygisk::AppSpecializeArgs* args) override {
-        if (!g_env) {
-            LOGE("JNIEnv is NULL di preAppSpecialize!");
-            return;
-        }
+    JNIEnv* env = nullptr;
+    if (g_api) g_api->get_jni_env(&env);
+    if (!env) {
+        LOGE("JNIEnv is NULL di preAppSpecialize!");
+        return;
+    }
 
-        // Get nice_name for logging
-        const char *nice_name = nullptr;
-        if (args->nice_name) {
-            nice_name = g_env->GetStringUTFChars(args->nice_name, nullptr);
-            LOGI("preAppSpecialize: nice_name = [%s]", nice_name ? nice_name : "NULL");
-        }
+    const char *nice_name = nullptr;
+    if (args->nice_name) {
+        nice_name = env->GetStringUTFChars(args->nice_name, nullptr);
+        LOGI("preAppSpecialize: nice_name = [%s]", nice_name ? nice_name : "NULL");
+    }
 
-        // Get app_data_dir to extract package name
-        const char *app_data_dir = nullptr;
-        const char *package_name = nullptr;
-        if (args->app_data_dir) {
-            app_data_dir = g_env->GetStringUTFChars(args->app_data_dir, nullptr);
-            LOGI("preAppSpecialize: app_data_dir = [%s]", app_data_dir ? app_data_dir : "NULL");
+    const char *app_data_dir = nullptr;
+    const char *package_name = nullptr;
+    if (args->app_data_dir) {
+        app_data_dir = env->GetStringUTFChars(args->app_data_dir, nullptr);
+        LOGI("preAppSpecialize: app_data_dir = [%s]", app_data_dir ? app_data_dir : "NULL");
 
-            // Extract package name from app_data_dir
-            package_name = extract_package_name(app_data_dir);
-            if (package_name) {
-                LOGI("Extracted package name: [%s]", package_name);
-                apply_hooks_if_target_app(package_name);
-            }
-        }
-
-        // If we couldn't extract package name from app_data_dir, try to use nice_name
-        if (!package_name && nice_name) {
-            LOGI("Falling back to nice_name as package identifier");
-            apply_hooks_if_target_app(nice_name);
-        }
-
-        // Clean up
-        if (nice_name) {
-            g_env->ReleaseStringUTFChars(args->nice_name, nice_name);
-        }
-        if (app_data_dir) {
-            g_env->ReleaseStringUTFChars(args->app_data_dir, app_data_dir);
+        package_name = extract_package_name(app_data_dir);
+        if (package_name) {
+            LOGI("Extracted package name: [%s]", package_name);
+            apply_hooks_if_target_app(package_name);
         }
     }
+
+    if (!package_name && nice_name) {
+        LOGI("Falling back to nice_name as package identifier");
+        apply_hooks_if_target_app(nice_name);
+    }
+
+    if (nice_name) {
+        env->ReleaseStringUTFChars(args->nice_name, nice_name);
+    }
+    if (app_data_dir) {
+        env->ReleaseStringUTFChars(args->app_data_dir, app_data_dir);
+    }
+}
 
     void postAppSpecialize(const zygisk::AppSpecializeArgs* /*args*/) override {
         LOGI("postAppSpecialize dipanggil");
