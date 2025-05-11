@@ -1,7 +1,6 @@
 #include <unistd.h>
 #include <cstdlib>
 #include <android/log.h>
-#include <cstring>
 #include "zygisk.hpp"
 
 // Deklarasi fungsi dari main.cpp yang akan dipanggil
@@ -14,44 +13,29 @@ extern "C" {
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-// Utility untuk mengambil process name dari /proc/self/cmdline
-static void get_process_name(char* buf, size_t len) {
-    buf[0] = 0;
-    FILE *f = fopen("/proc/self/cmdline", "r");
-    if (f) {
-        size_t r = fread(buf, 1, len - 1, f);
-        buf[r] = 0;
-        fclose(f);
-    }
-}
-
+// Implementasi modul Zygisk
 class SnapdragonSpoofModule : public zygisk::ModuleBase {
 public:
     void onLoad(zygisk::Api *api, JNIEnv *env) override {
         this->api = api;
         this->env = env;
         LOGI("SnapdragonSpoof module loaded (onLoad)");
-
-        char process_name[256] = {0};
-        get_process_name(process_name, sizeof(process_name));
-        LOGI("onLoad: Detected process name: [%s]", process_name);
-
-        // Pasang hook lebih awal, namun tetap per-app
-        apply_hooks_if_target_app(process_name);
-
         init_snapdragon_spoof();
     }
 
+    // Dipanggil sebelum proses app dispecialize
     void preAppSpecialize(zygisk::AppSpecializeArgs *args) override {
         if (!env) {
             LOGE("JNIEnv is NULL di preAppSpecialize!");
             return;
         }
+        // Ambil nama proses dari nice_name (biasanya berisi package name)
         const char *process = nullptr;
         if (args->nice_name) {
             process = env->GetStringUTFChars(args->nice_name, nullptr);
             LOGI("preAppSpecialize: nice_name = [%s]", process ? process : "NULL");
-            // Tidak perlu panggil apply_hooks_if_target_app di sini lagi, sudah di onLoad
+            // Panggil fungsi hook dari main.cpp hanya jika proses terdaftar sebagai target
+            apply_hooks_if_target_app(process);
             env->ReleaseStringUTFChars(args->nice_name, process);
         } else {
             LOGI("preAppSpecialize: nice_name NULL");
@@ -63,6 +47,7 @@ public:
     }
 
     void preServerSpecialize(zygisk::ServerSpecializeArgs *args) override {
+        // Contoh: gunakan enum yang benar, misal FORCE_DENYLIST_UNMOUNT
         if (api) api->setOption(zygisk::FORCE_DENYLIST_UNMOUNT);
     }
 
@@ -71,4 +56,5 @@ private:
     JNIEnv *env = nullptr;
 };
 
+// ---- ENTRY POINT ZYGISK MODERN ----
 REGISTER_ZYGISK_MODULE(SnapdragonSpoofModule)
