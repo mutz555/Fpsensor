@@ -27,7 +27,6 @@ static const char *target_packages[] = {
     "com.netease.marvel.marvelsuperwarglobal", "com.supercell.brawlstars", "com.dts.freefireth",
     "com.dts.freefiremax", "com.riotgames.league.wildrift", "com.riotgames.legendsofruneterra",
     "com.riotgames.tacticiansandroid"
-    // HAPUS: "android.process.media", "com.android.systemui", "com.android.settings"
 };
 static const size_t target_packages_count = sizeof(target_packages) / sizeof(target_packages[0]);
 
@@ -84,28 +83,24 @@ static const char* get_process_name() {
     return "unknown";
 }
 
-// Cek apakah proses target game
-static bool check_if_target_process(const char* process_name) {
-    if (!process_name || strlen(process_name) == 0) {
-        process_name = get_process_name();
-    }
-    LOGI("Checking if target: [%s]", process_name);
+// Deteksi target hanya sekali di awal proses
+static void detect_if_target_process(const char* process_name) {
+    enable_spoof = false;
+    if (!process_name || strlen(process_name) == 0) return;
     for (size_t i = 0; i < target_packages_count; i++) {
-        if (strcmp(process_name, target_packages[i]) == 0) {
-            LOGI("Target app matched exactly: %s", process_name);
-            return true;
-        }
-        if (strstr(process_name, target_packages[i]) != NULL) {
-            LOGI("Target app matched partially: %s contains %s", process_name, target_packages[i]);
-            return true;
+        if (strcmp(process_name, target_packages[i]) == 0 ||
+            strstr(process_name, target_packages[i]) != NULL) {
+            enable_spoof = true;
+            LOGI("Detected target app: %s (spoof enabled)", process_name);
+            return;
         }
     }
-    return false;
+    LOGI("Not target app: %s (spoof disabled)", process_name);
 }
 
-// AKTIFKAN SPOOF HANYA JIKA PROSES ADALAH GAME TARGET!
+// should_spoof cukup cek flag
 static bool should_spoof() {
-    return enable_spoof && check_if_target_process(get_process_name());
+    return enable_spoof;
 }
 
 // Find spoofed property value
@@ -121,9 +116,10 @@ static bool find_spoofed_prop(const char *name, char *value) {
 
 // Hook untuk open sebagai test
 extern "C" int my_open(const char* path, int flags, ...) {
-    if (should_spoof() && path && strstr(path, "property")) {
-        LOGI("[%s] open() called: %s", get_process_name(), path);
-    }
+    // Untuk debug saja, aktifkan kalau perlu
+    // if (should_spoof() && path && strstr(path, "property")) {
+    //     LOGI("[%s] open() called: %s", get_process_name(), path);
+    // }
     va_list args;
     va_start(args, flags);
     mode_t mode = va_arg(args, int);
@@ -133,11 +129,11 @@ extern "C" int my_open(const char* path, int flags, ...) {
 
 // Hook for __system_property_get
 extern "C" int my___system_property_get(const char *name, char *value) {
-    LOGI("HOOKED: __system_property_get(%s) dipanggil", name);
+    // LOGI("HOOKED: __system_property_get(%s) dipanggil", name); // aktifkan hanya untuk debug
     int ret = orig___system_property_get(name, value);
     if (should_spoof()) {
         if (find_spoofed_prop(name, value)) {
-            LOGI("[%s] Spoofed property get: %s -> %s", get_process_name(), name, value);
+            LOGI("Spoofed property get: %s -> %s", name, value);
             return strlen(value);
         }
     }
@@ -146,13 +142,13 @@ extern "C" int my___system_property_get(const char *name, char *value) {
 
 // Hook for __system_property_read
 extern "C" int my___system_property_read(const prop_info *pi, char *name, char *value) {
-    LOGI("HOOKED: __system_property_read(%s) dipanggil", name);
+    // LOGI("HOOKED: __system_property_read(%s) dipanggil", name); // aktifkan hanya untuk debug
     int ret = orig___system_property_read(pi, name, value);
     if (should_spoof() && ret > 0) {
         char spoofed_value[PROP_VALUE_MAX];
         if (find_spoofed_prop(name, spoofed_value)) {
             strcpy(value, spoofed_value);
-            LOGI("[%s] Spoofed property read: %s -> %s", get_process_name(), name, value);
+            LOGI("Spoofed property read: %s -> %s", name, value);
         }
     }
     return ret;
@@ -170,7 +166,7 @@ static void callback_wrapper(void *cookie, const char *name, const char *value, 
     const char *final_value = value;
     if (should_spoof() && find_spoofed_prop(name, spoofed_value)) {
         final_value = spoofed_value;
-        LOGI("[%s] Spoofed property callback: %s -> %s", get_process_name(), name, final_value);
+        LOGI("Spoofed property callback: %s -> %s", name, final_value);
     }
     info->orig_callback(info->orig_cookie, name, final_value, serial);
     delete info;
@@ -180,7 +176,7 @@ static void callback_wrapper(void *cookie, const char *name, const char *value, 
 extern "C" int my___system_property_read_callback(const prop_info *pi,
     void (*callback)(void *cookie, const char *name, const char *value, uint32_t serial),
     void *cookie) {
-    LOGI("HOOKED: __system_property_read_callback dipanggil");
+    // LOGI("HOOKED: __system_property_read_callback dipanggil"); // aktifkan hanya untuk debug
     if (!should_spoof()) {
         return orig___system_property_read_callback(pi, callback, cookie);
     }
@@ -188,7 +184,7 @@ extern "C" int my___system_property_read_callback(const prop_info *pi,
     return orig___system_property_read_callback(pi, callback_wrapper, info);
 }
 
-// Inisialisasi xhook dan menerapkan hook (pattern luas, tapi hanya aktif di game)
+// Inisialisasi xhook dan menerapkan hook
 static bool apply_hooks() {
     if (hook_applied) {
         LOGI("Hooks already applied, skipping");
@@ -202,38 +198,25 @@ static bool apply_hooks() {
 
     int ret1 = xhook_register(pattern_so, "__system_property_get",
         (void*)my___system_property_get, (void**)&orig___system_property_get);
-    LOGI("xhook __system_property_get (all .so): %d", ret1);
-
     int ret1b = xhook_register(pattern_libc, "__system_property_get",
         (void*)my___system_property_get, (void**)&orig___system_property_get);
-    LOGI("xhook __system_property_get (libc.*.so): %d", ret1b);
 
     int ret2 = xhook_register(pattern_so, "__system_property_read",
         (void*)my___system_property_read, (void**)&orig___system_property_read);
-    LOGI("xhook __system_property_read (all .so): %d", ret2);
-
     int ret2b = xhook_register(pattern_libc, "__system_property_read",
         (void*)my___system_property_read, (void**)&orig___system_property_read);
-    LOGI("xhook __system_property_read (libc.*.so): %d", ret2b);
 
     int ret3 = xhook_register(pattern_so, "__system_property_read_callback",
         (void*)my___system_property_read_callback, (void**)&orig___system_property_read_callback);
-    LOGI("xhook __system_property_read_callback (all .so): %d", ret3);
-
     int ret3b = xhook_register(pattern_libc, "__system_property_read_callback",
         (void*)my___system_property_read_callback, (void**)&orig___system_property_read_callback);
-    LOGI("xhook __system_property_read_callback (libc.*.so): %d", ret3b);
 
     int ret4 = xhook_register(pattern_so, "open",
         (void*)my_open, (void**)&orig_open);
-    LOGI("xhook open (all .so): %d", ret4);
-
     int ret4b = xhook_register(pattern_libc, "open",
         (void*)my_open, (void**)&orig_open);
-    LOGI("xhook open (libc.*.so): %d", ret4b);
 
     int ret = xhook_refresh(0);
-    LOGI("xhook_refresh returned: %d", ret);
 
     bool success = (ret1 == 0 || ret1b == 0) &&
                    (ret2 == 0 || ret2b == 0) &&
@@ -261,7 +244,6 @@ extern "C" void init_snapdragon_spoof() {
     __system_property_get("ro.build.version.sdk", sdk_ver);
     LOGI("Android SDK version: %s", sdk_ver);
 
-    LOGI("Checking loaded libraries");
     FILE* maps = fopen("/proc/self/maps", "r");
     if (maps) {
         char line[512];
@@ -272,10 +254,11 @@ extern "C" void init_snapdragon_spoof() {
         }
         fclose(maps);
     }
+
     const char* proc_name = get_process_name();
-    if (check_if_target_process(proc_name)) {
+    detect_if_target_process(proc_name);
+    if (should_spoof()) {
         LOGI("Target process detected during init: %s", proc_name);
-        enable_spoof = true;
         apply_hooks();
     }
 }
@@ -286,14 +269,13 @@ extern "C" void apply_hooks_if_target_app(const char* process_name) {
     if (process_name && strlen(process_name) > 0) {
         strncpy(current_process_name, process_name, sizeof(current_process_name) - 1);
     }
-    bool is_target = check_if_target_process(process_name);
-    if (!is_target) {
+    detect_if_target_process(current_process_name);
+    if (!should_spoof()) {
         LOGI("Not a target app, skipping: %s", process_name ? process_name : "NULL");
         return;
     }
-    enable_spoof = true;
     apply_hooks();
-    if (enable_spoof && hook_applied) {
+    if (hook_applied) {
         LOGI("Verifying hook effectiveness");
         char value[PROP_VALUE_MAX];
         __system_property_get("ro.hardware.chipset", value);
