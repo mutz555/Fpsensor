@@ -66,7 +66,7 @@ static const char* get_process_name() {
         LOGI("Got process name from getprogname: %s", current_process_name);
         return current_process_name;
     }
-    LOGW("Failed to get process name");
+    LOGE("Failed to get process name");
     return "unknown";
 }
 
