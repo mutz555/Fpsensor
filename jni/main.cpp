@@ -15,18 +15,19 @@
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
 
-// Target packages to apply spoofing (use exact package names)
+// Target packages: hanya game & benchmarking, JANGAN proses sistem!
 static const char *target_packages[] = {
     "com.tencent.ig", "com.pubg.imobile", "com.pubg.krmobile", "com.vng.pubgmobile", "com.rekoo.pubgm",
     "com.tencent.tmgp.pubgmhd", "com.pubg.newstate", "flar2.devcheck", "com.antutu.ABenchMark",
-    "com.primatelabs.geekbench", "com.android.vending", "com.mobile.legends", "com.miHoYo.GenshinImpact",
+    "com.primatelabs.geekbench", "com.mobile.legends", "com.miHoYo.GenshinImpact",
     "com.miHoYo.Yuanshen", "com.miHoYo.honkaiimpact3", "com.miHoYo.bh3.global", "com.miHoYo.bh3.eur",
     "com.hoyoverse.hkrpg.global", "com.miHoYo.hkrpg", "com.hoyoverse.hkrpgoversea",
     "com.activision.callofduty.shooter", "com.garena.game.codm", "com.tencent.tmgp.cod",
     "com.ea.gp.apexlegendsmobilefps", "com.epicgames.fortnite", "com.netease.party.m",
     "com.netease.marvel.marvelsuperwarglobal", "com.supercell.brawlstars", "com.dts.freefireth",
     "com.dts.freefiremax", "com.riotgames.league.wildrift", "com.riotgames.legendsofruneterra",
-    "com.riotgames.tacticiansandroid", "android.process.media", "com.android.systemui", "com.android.settings"
+    "com.riotgames.tacticiansandroid"
+    // HAPUS: "android.process.media", "com.android.systemui", "com.android.settings"
 };
 static const size_t target_packages_count = sizeof(target_packages) / sizeof(target_packages[0]);
 
@@ -51,8 +52,6 @@ static int (*orig___system_property_get)(const char *name, char *value) = nullpt
 static int (*orig___system_property_read)(const prop_info *pi, char *name, char *value) = nullptr;
 static int (*orig___system_property_read_callback)(const prop_info *pi,
     void (*callback)(void *cookie, const char *name, const char *value, uint32_t serial), void *cookie) = nullptr;
-
-// Debug aide - hook untuk open() sebagai test
 static int (*orig_open)(const char* path, int flags, ...) = nullptr;
 
 // Per-process flag
@@ -85,9 +84,28 @@ static const char* get_process_name() {
     return "unknown";
 }
 
-// Check if we should spoof for this process
+// Cek apakah proses target game
+static bool check_if_target_process(const char* process_name) {
+    if (!process_name || strlen(process_name) == 0) {
+        process_name = get_process_name();
+    }
+    LOGI("Checking if target: [%s]", process_name);
+    for (size_t i = 0; i < target_packages_count; i++) {
+        if (strcmp(process_name, target_packages[i]) == 0) {
+            LOGI("Target app matched exactly: %s", process_name);
+            return true;
+        }
+        if (strstr(process_name, target_packages[i]) != NULL) {
+            LOGI("Target app matched partially: %s contains %s", process_name, target_packages[i]);
+            return true;
+        }
+    }
+    return false;
+}
+
+// AKTIFKAN SPOOF HANYA JIKA PROSES ADALAH GAME TARGET!
 static bool should_spoof() {
-    return enable_spoof;
+    return enable_spoof && check_if_target_process(get_process_name());
 }
 
 // Find spoofed property value
@@ -170,26 +188,7 @@ extern "C" int my___system_property_read_callback(const prop_info *pi,
     return orig___system_property_read_callback(pi, callback_wrapper, info);
 }
 
-// Fungsi untuk memeriksa apakah proses saat ini cocok dengan salah satu target
-static bool check_if_target_process(const char* process_name) {
-    if (!process_name || strlen(process_name) == 0) {
-        process_name = get_process_name();
-    }
-    LOGI("Checking if target: [%s]", process_name);
-    for (size_t i = 0; i < target_packages_count; i++) {
-        if (strcmp(process_name, target_packages[i]) == 0) {
-            LOGI("Target app matched exactly: %s", process_name);
-            return true;
-        }
-        if (strstr(process_name, target_packages[i]) != NULL) {
-            LOGI("Target app matched partially: %s contains %s", process_name, target_packages[i]);
-            return true;
-        }
-    }
-    return false;
-}
-
-// Inisialisasi xhook dan menerapkan hook (pattern luas)
+// Inisialisasi xhook dan menerapkan hook (pattern luas, tapi hanya aktif di game)
 static bool apply_hooks() {
     if (hook_applied) {
         LOGI("Hooks already applied, skipping");
@@ -198,7 +197,6 @@ static bool apply_hooks() {
     LOGI("Installing hooks for process: %s", get_process_name());
     xhook_clear();
 
-    // Pattern luas: semua .so dan semua libc
     const char* pattern_so = ".*\\.so$";
     const char* pattern_libc = ".*libc.*\\.so$";
 
@@ -226,7 +224,6 @@ static bool apply_hooks() {
         (void*)my___system_property_read_callback, (void**)&orig___system_property_read_callback);
     LOGI("xhook __system_property_read_callback (libc.*.so): %d", ret3b);
 
-    // (Opsional) Hook open() untuk debug
     int ret4 = xhook_register(pattern_so, "open",
         (void*)my_open, (void**)&orig_open);
     LOGI("xhook open (all .so): %d", ret4);
@@ -235,11 +232,9 @@ static bool apply_hooks() {
         (void*)my_open, (void**)&orig_open);
     LOGI("xhook open (libc.*.so): %d", ret4b);
 
-    // Refresh hook
     int ret = xhook_refresh(0);
     LOGI("xhook_refresh returned: %d", ret);
 
-    // Cek status
     bool success = (ret1 == 0 || ret1b == 0) &&
                    (ret2 == 0 || ret2b == 0) &&
                    (ret3 == 0 || ret3b == 0) &&
