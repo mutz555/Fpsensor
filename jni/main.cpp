@@ -1,84 +1,42 @@
 #include <cstring>
-#include <unistd.h>
-#include <cerrno>
+#include <string>
+#include <vector>
+#include <unistd.h>    // Untuk ssize_t, readlink, dll.
 #include <cstdlib>
 #include <android/log.h>
-#include <xhook.h> // Anda sudah menggunakan xhook
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <stdio.h>
-#include "zygisk.hpp" // Asumsi ini adalah header Zygisk dari template Anda
+#include <fcntl.h>     // Untuk O_RDWR, O_CREAT, dll.
+#include <sys/stat.h>  // Tidak langsung digunakan, tapi terkait
+#include <stdio.h>     // Untuk fopen, fgets, fclose
+#include <dlfcn.h>     // Tidak digunakan untuk hook, tapi bisa untuk debug
+#include <cerrno>      // Untuk errno dan EACCES, EFAULT
+#include "zygisk.hpp"  // Header Zygisk Anda
 
-#define LOG_TAG "FingerprintHALExperiment" // Ganti LOG_TAG
+#define LOG_TAG "FingerprintFPCExperiment"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
 
-// ----- HAPUS BAGIAN SnapdragonSpoof -----
-// static const char *target_packages[] = { ... };
-// static const size_t target_packages_count = ...;
-// static const char *spoofed_props[][2] = { ... };
-// static const size_t spoofed_props_count = ...;
-// -----------------------------------------
-
-// Nama proses target untuk hook open (ini perlu disesuaikan/diverifikasi)
-// Biner service HAL utama Anda adalah target yang paling mungkin.
-// Jika tidak tahu pasti, Anda bisa meng-hook di system_server dan melihat apakah [GF_HAL] berjalan di sana,
-// atau mencoba menebak nama proses daemon HAL.
-// Contoh: "/vendor/bin/hw/android.hardware.biometrics.fingerprint@2.1-service"
-// atau "system_server" jika pemeriksaan device node terjadi di sana.
-// Untuk eksperimen awal, mungkin lebih aman menargetkan proses HAL spesifik jika diketahui.
-// Jika tidak, menargetkan semua proses dengan xhook (pattern ".*") akan terlalu luas dan berisiko.
-// Kita akan mencoba menargetkan library libc.so secara umum untuk fungsi open,
-// dan memfilter berdasarkan nama proses di dalam fungsi hook.
-static const char *TARGET_FP_SERVICE_PROCESS_NAME = "/vendor/bin/hw/android.hardware.biometrics.fingerprint@2.1-service";
-// Alternatif jika GF_HAL adalah bagian dari proses lain:
-// static const char *TARGET_FP_SERVICE_PROCESS_NAME_ALT = "nama_proses_gf_hal_jika_berbeda";
+// --- Konfigurasi Target ---
+// Nama proses yang menjalankan service HAL fingerprint utama.
+// Berdasarkan log Anda, PID 1388 (di perangkat FPC Anda) menjalankan [GF_HAL] dan kemudian
+// beralih ke "fpsensor_fingerprint". Anda perlu mengonfirmasi nama proses pasti dari PID tersebut.
+// Kemungkinan besar: "/vendor/bin/hw/android.hardware.biometrics.fingerprint@2.1-service"
+// Atau bisa juga "system_server" jika beberapa logika awal terjadi di sana sebelum HAL di-spawn.
+// Untuk Zygisk postAppSpecialize, kita akan menggunakan nice_name yang mungkin adalah nama service.
+static const char *TARGET_PROCESS_NICE_NAME = "android.hardware.biometrics.fingerprint@2.1-service";
+// Anda mungkin perlu juga memeriksa path biner absolut jika nice_name berbeda:
+// static const char *TARGET_PROCESS_BINARY_PATH = "/vendor/bin/hw/android.hardware.biometrics.fingerprint@2.1-service";
 
 
-// Original function pointers
-static int (*orig_open)(const char* pathname, int flags, ...) = nullptr;
-// Mungkin juga perlu open64 jika sistem menggunakan itu untuk path /dev
-static int (*orig_open64)(const char* pathname, int flags, ...) = nullptr;
-// Mungkin juga access atau stat, tapi kita mulai dengan open.
-// static int (*orig_access)(const char *pathname, int mode) = nullptr;
+// Variabel untuk menyimpan pointer ke fungsi asli
+static int (*original_open)(const char* pathname, int flags, ...) = nullptr;
+static int (*original_open64)(const char* pathname, int flags, ...) = nullptr;
 
+// Flag untuk memastikan hook hanya dipasang sekali per proses target
+static bool hooks_applied_to_target = false;
 
-static bool hook_applied_fp_experiment = false;
-static char current_process_name_fp_exp[256] = {0};
-
-// Utility untuk mendapatkan nama proses (sudah ada di template Anda, bisa dipakai ulang)
-static const char* get_current_process_name_fp() {
-    if (current_process_name_fp_exp[0] != '\0') {
-        return current_process_name_fp_exp;
-    }
-    FILE* cmdline = fopen("/proc/self/cmdline", "r");
-    if (cmdline) {
-        fgets(current_process_name_fp_exp, sizeof(current_process_name_fp_exp), cmdline);
-        fclose(cmdline);
-        // Hapus newline jika ada
-        char* newline = strchr(current_process_name_fp_exp, '\n');
-        if (newline) *newline = '\0';
-        
-        // cmdline bisa berisi argumen lain setelah null terminator pertama,
-        // jadi pastikan kita hanya mengambil bagian pertama.
-        // Atau bisa juga seperti ini untuk kasus path biner absolut:
-        if (strlen(current_process_name_fp_exp) == 0) { // Jika cmdline kosong, coba readlink /proc/self/exe
-             ssize_t len = readlink("/proc/self/exe", current_process_name_fp_exp, sizeof(current_process_name_fp_exp) - 1);
-             if (len > 0) {
-                 current_process_name_fp_exp[len] = '\0';
-             }
-        }
-
-        LOGI("Current process name (fp_exp): %s", current_process_name_fp_exp);
-        return current_process_name_fp_exp;
-    }
-    LOGE("Failed to get process name (fp_exp)");
-    return "unknown_process";
-}
-
-
-// Hook for open
-extern "C" int hooked_open_fp_experiment(const char* pathname, int flags, ...) {
+// Fungsi hook untuk open
+int hooked_open_for_experiment(const char* pathname, int flags, ...) {
     mode_t mode = 0;
     // O_CREAT adalah salah satu flag yang membutuhkan argumen mode ketiga
     if ((flags & O_CREAT) == O_CREAT) {
@@ -88,40 +46,40 @@ extern "C" int hooked_open_fp_experiment(const char* pathname, int flags, ...) {
         va_end(args);
     }
 
-    const char* current_proc = get_current_process_name_fp();
-    bool is_target_process = (strcmp(current_proc, TARGET_FP_SERVICE_PROCESS_NAME) == 0);
-                               // Tambahkan || strcmp(current_proc, TARGET_FP_SERVICE_PROCESS_NAME_ALT) == 0 jika ada alternatif
+    // Logging akan dilakukan oleh Zygisk jika hook terpasang pada proses yang benar
+    LOGI("hooked_open: path='%s', flags=%#x", pathname ? pathname : "NULL", flags);
 
-    if (is_target_process && pathname && strcmp(pathname, "/dev/goodix_fp") == 0) {
-        LOGI("hooked_open_fp_experiment: Intercepted open for /dev/goodix_fp in target process %s. Flags: %d", current_proc, flags);
-        
-        // Strategi: Kembalikan FD dari /dev/null agar pemeriksaan "keberadaan" berhasil,
-        // tetapi operasi selanjutnya pada FD ini kemungkinan akan gagal atau tidak berarti.
-        // Ini akan menguji apakah [GF_HAL] melanjutkan jika ia mengira device node ada.
+    if (pathname && strcmp(pathname, "/dev/goodix_fp") == 0) {
+        LOGI(">>> Intercepted open for /dev/goodix_fp. Simulating presence by opening /dev/null.");
         int fd_dev_null = -1;
-        if (orig_open) { // Panggil open asli untuk /dev/null
-             fd_dev_null = orig_open("/dev/null", O_RDWR); 
+        if (original_open) {
+             // Buka /dev/null dengan flag yang diminta (kecuali O_CREAT, O_EXCL, dll yang tidak relevan untuk /dev/null)
+             // Untuk kesederhanaan, kita buka dengan O_RDWR.
+             fd_dev_null = original_open("/dev/null", O_RDWR);
+        } else {
+            LOGE("original_open is NULL when trying to open /dev/null for /dev/goodix_fp!");
+            errno = EFAULT; // Pointer buruk
+            return -1;
         }
-        LOGI("hooked_open_fp_experiment: For /dev/goodix_fp, returning FD of /dev/null: %d", fd_dev_null);
+        LOGI("For /dev/goodix_fp, returning FD of /dev/null: %d", fd_dev_null);
         return fd_dev_null;
     }
 
-    // Panggil fungsi open asli untuk path lain atau proses lain
-    if (orig_open) {
+    // Panggil fungsi open asli untuk path lain
+    if (original_open) {
         if ((flags & O_CREAT) == O_CREAT) {
-            return orig_open(pathname, flags, mode);
+            return original_open(pathname, flags, mode);
         } else {
-            return orig_open(pathname, flags);
+            return original_open(pathname, flags);
         }
     }
-    // Fallback jika orig_open tidak ter-resolve (seharusnya tidak terjadi jika xhook berhasil)
-    LOGE("hooked_open_fp_experiment: orig_open is null!");
-    errno = EACCES; // Kembalikan error yang masuk akal
+    LOGE("original_open is NULL at end of hooked_open!");
+    errno = EFAULT;
     return -1;
 }
 
-// Hook untuk open64 (sering digunakan untuk file besar atau device node)
-extern "C" int hooked_open64_fp_experiment(const char* pathname, int flags, ...) {
+// Fungsi hook untuk open64
+int hooked_open64_for_experiment(const char* pathname, int flags, ...) {
     mode_t mode = 0;
     if ((flags & O_CREAT) == O_CREAT) {
         va_list args;
@@ -130,197 +88,163 @@ extern "C" int hooked_open64_fp_experiment(const char* pathname, int flags, ...)
         va_end(args);
     }
 
-    const char* current_proc = get_current_process_name_fp();
-    bool is_target_process = (strcmp(current_proc, TARGET_FP_SERVICE_PROCESS_NAME) == 0);
+    LOGI("hooked_open64: path='%s', flags=%#x", pathname ? pathname : "NULL", flags);
 
-    if (is_target_process && pathname && strcmp(pathname, "/dev/goodix_fp") == 0) {
-        LOGI("hooked_open64_fp_experiment: Intercepted open64 for /dev/goodix_fp in target process %s. Flags: %d", current_proc, flags);
+    if (pathname && strcmp(pathname, "/dev/goodix_fp") == 0) {
+        LOGI(">>> Intercepted open64 for /dev/goodix_fp. Simulating presence by opening /dev/null.");
         int fd_dev_null = -1;
-        if (orig_open64) {
-             fd_dev_null = orig_open64("/dev/null", O_RDWR);
-        } else if (orig_open) { // Fallback ke orig_open jika orig_open64 tidak dihook/ditemukan
-             fd_dev_null = orig_open("/dev/null", O_RDWR);
+        if (original_open64) {
+             fd_dev_null = original_open64("/dev/null", O_RDWR);
+        } else if (original_open) { // Fallback jika original_open64 tidak ditemukan/dihook
+             LOGW("original_open64 is NULL, falling back to original_open for /dev/goodix_fp via /dev/null");
+             fd_dev_null = original_open("/dev/null", O_RDWR);
+        } else {
+            LOGE("original_open64 and original_open are NULL for /dev/goodix_fp!");
+            errno = EFAULT;
+            return -1;
         }
-        LOGI("hooked_open64_fp_experiment: For /dev/goodix_fp, returning FD of /dev/null: %d", fd_dev_null);
+        LOGI("For /dev/goodix_fp, returning FD of /dev/null (via open64 hook): %d", fd_dev_null);
         return fd_dev_null;
     }
 
-    if (orig_open64) {
+    // Panggil fungsi open64 asli untuk path lain
+    if (original_open64) {
         if ((flags & O_CREAT) == O_CREAT) {
-            return orig_open64(pathname, flags, mode);
+            return original_open64(pathname, flags, mode);
         } else {
-            return orig_open64(pathname, flags);
+            return original_open64(pathname, flags);
         }
-    } else if (orig_open) { // Fallback jika orig_open64 tidak dihook/ditemukan
+    } else if (original_open) { // Fallback
+        LOGW("original_open64 is NULL, falling back to original_open in hooked_open64");
          if ((flags & O_CREAT) == O_CREAT) {
-            return orig_open(pathname, flags, mode);
+            return original_open(pathname, flags, mode);
         } else {
-            return orig_open(pathname, flags);
+            return original_open(pathname, flags);
         }
     }
-    LOGE("hooked_open64_fp_experiment: orig_open64 (and orig_open) is null!");
-    errno = EACCES;
+    LOGE("original_open64 and original_open are NULL at end of hooked_open64!");
+    errno = EFAULT;
     return -1;
 }
 
 
-static void apply_fp_experiment_hooks(const char* process_name) {
-    if (hook_applied_fp_experiment) {
-        // LOGI("FP Experiment hooks already applied for %s, skipping", process_name);
-        return;
-    }
-
-    // Hanya pasang hook jika ini adalah proses target kita
-    if (strcmp(process_name, TARGET_FP_SERVICE_PROCESS_NAME) != 0) {
-        // LOGI("Not the target FP service process (%s), skipping hooks.", process_name);
-        return;
-    }
-    
-    LOGI("Installing FP Experiment hooks for process: %s", process_name);
-    // xhook_clear(); // Hati-hati jika ada hook lain yang ingin dipertahankan dari template asli.
-                   // Jika ini satu-satunya set hook, maka clear OK. Jika tidak, jangan clear.
-                   // Untuk sekarang, kita asumsikan kita ingin mengganti semua logika hook.
-    
-    // Kita akan hook libc.so karena 'open' adalah fungsi libc standar
-    const char* pattern_libc = "libc\\.so$"; 
-    // Atau bisa juga ".*" untuk semua library, tapi lebih baik spesifik jika memungkinkan.
-    // Jika service HAL di-link secara statis dengan libc versi lain, pattern perlu disesuaikan.
-
-    int ret_open = xhook_register(pattern_libc, "open",
-        (void*)hooked_open_fp_experiment, (void**)&orig_open);
-    int ret_open64 = xhook_register(pattern_libc, "open64",
-        (void*)hooked_open64_fp_experiment, (void**)&orig_open64);
-
-    // Anda juga bisa menambahkan hook untuk "access" atau "stat" jika 'open' tidak cukup
-    // int ret_access = xhook_register(pattern_libc, "access", ...);
-
-    int ret_refresh = xhook_refresh(0); // Terapkan semua hook yang terdaftar
-
-    bool success = (ret_open == 0) && (ret_open64 == 0) && (ret_refresh == 0);
-
-    if (success) {
-        LOGI("FP Experiment hook injection completed successfully for %s!", process_name);
-        hook_applied_fp_experiment = true;
-    } else {
-        LOGE("Failed to apply one or more FP Experiment hooks for %s!", process_name);
-        if (ret_open != 0) LOGE("open hook failed: %d", ret_open);
-        if (ret_open64 != 0) LOGE("open64 hook failed: %d", ret_open64);
-        if (ret_refresh != 0) LOGE("xhook_refresh failed: %d", ret_refresh);
-    }
-}
-
-// Anda perlu cara untuk memanggil apply_fp_experiment_hooks
-// dari dalam fungsi yang disediakan Zygisk (misalnya preAppSpecialize atau preServerSpecialize)
-// dan hanya untuk proses target.
-
-class MyModule : public zygisk::ModuleBase {
+class FPCGoodixExperimentModule : public zygisk::ModuleBase {
 public:
     void onLoad(zygisk::Api* api, JNIEnv* env) override {
         this->api = api;
         this->env = env;
-        LOGI("FingerprintHALExperiment Zygisk module loaded");
+        LOGI("FPCGoodixExperimentModule Zygisk module loaded (onLoad).");
     }
 
-    // Hook untuk proses aplikasi (termasuk beberapa proses sistem yang di-fork dari Zygote seperti aplikasi)
-    void preAppSpecialize(zygisk::AppSpecializeArgs* args) override {
-        const char* process_name = env->GetStringUTFChars(args->nice_name, nullptr);
-        if (process_name) {
-            // Simpan nama proses untuk digunakan nanti jika perlu
-            strncpy(current_process_name_fp_exp, process_name, sizeof(current_process_name_fp_exp) -1);
-            current_process_name_fp_exp[sizeof(current_process_name_fp_exp)-1] = '\0';
+    // Dipanggil untuk setiap proses aplikasi yang di-fork oleh Zygote
+    void postAppSpecialize(const zygisk::AppSpecializeArgs* args) override {
+        if (hooks_applied_to_target) { // Jika hook sudah dipasang untuk proses target, jangan lakukan lagi
+            return;
+        }
+        if (!args || !args->nice_name) {
+            LOGW("postAppSpecialize: args or nice_name is null.");
+            return;
+        }
 
-            // Kita lebih tertarik pada proses HAL native atau system_server
-            // jadi mungkin tidak melakukan hook di sini, kecuali jika proses HAL di-spawn sebagai app.
-            // Untuk sekarang, kita coba hook di preServerSpecialize juga.
-            // LOGI("preAppSpecialize: process_name=%s, uid=%d", process_name, args->uid);
+        const char* raw_process_nice_name = env->GetStringUTFChars(args->nice_name, nullptr);
+        if (!raw_process_nice_name) {
+            LOGW("postAppSpecialize: Failed to get nice_name chars.");
+            return;
+        }
+        std::string current_process_nice_name_str = raw_process_nice_name;
+        env->ReleaseStringUTFChars(args->nice_name, raw_process_nice_name);
+
+        // Log nama proses untuk debugging target
+        // LOGI("postAppSpecialize: Checking process with nice_name: '%s', uid: %d",
+        //      current_process_nice_name_str.c_str(), args->uid);
+
+        // Cek apakah ini proses target kita
+        // Nama service HAL native mungkin muncul sebagai nice_name jika di-spawn dengan cara tertentu.
+        // Atau, jika service HAL adalah bagian dari system_server, Anda perlu menargetkan "system_server".
+        // Untuk service native yang di-fork oleh init, penargetan dari Zygisk bisa lebih sulit.
+        // Kita asumsikan TARGET_PROCESS_NICE_NAME adalah nama yang akan muncul di nice_name.
+        if (current_process_nice_name_str == TARGET_PROCESS_NICE_NAME) {
+            LOGI(">>> Target process '%s' detected in postAppSpecialize. Applying PLT hooks to libc.so.",
+                 current_process_nice_name_str.c_str());
             
-            // Jika service HAL berjalan sebagai proses aplikasi biasa (jarang untuk HAL sistem)
-            // if (strcmp(process_name, TARGET_FP_SERVICE_PROCESS_NAME) == 0) {
-            //     apply_fp_experiment_hooks(process_name);
-            // }
-            env->ReleaseStringUTFChars(args->nice_name, process_name);
+            bool success_open = api->pltHookRegister(
+                "libc.so",  // Target library
+                "open",     // Simbol yang di-hook
+                (void*)hooked_open_for_experiment,
+                (void**)&original_open
+            );
+            bool success_open64 = api->pltHookRegister(
+                "libc.so",
+                "open64",
+                (void*)hooked_open64_for_experiment,
+                (void**)&original_open64
+            );
+            
+            if (success_open && success_open64) {
+                LOGI("Registered PLT hooks for open & open64 in libc.so for '%s'", current_process_nice_name_str.c_str());
+                if (api->pltHookCommit()) {
+                    LOGI("PLT hooks committed successfully for '%s'.", current_process_nice_name_str.c_str());
+                    hooks_applied_to_target = true; // Tandai bahwa hook sudah diterapkan untuk target ini
+                } else {
+                    LOGE("Failed to commit PLT hooks for '%s'.", current_process_nice_name_str.c_str());
+                }
+            } else {
+                LOGE("Failed to register PLT hooks for open/open64 in libc.so for '%s' (open: %d, open64: %d)", 
+                     current_process_nice_name_str.c_str(), success_open, success_open64);
+            }
         }
     }
-    
-    // Hook untuk system_server
+
+    // preServerSpecialize dipanggil sebelum system_server dispesialisasi.
+    // Jika service HAL Anda adalah bagian dari system_server atau di-load dari sana,
+    // ini bisa menjadi tempat untuk hook. Namun, service HAL native biasanya proses sendiri.
     void preServerSpecialize(zygisk::ServerSpecializeArgs* args) override {
-        // system_server adalah kandidat kuat jika pengecekan device node terjadi di framework Java
-        // atau jika service HAL di-load dari dalam system_server.
-        // Namun, service HAL fingerprint biasanya berjalan sebagai prosesnya sendiri.
-        // Kita akan tetap mencoba mendapatkan nama proses aktual di mana hook open akan berjalan.
-        // Untuk Zygisk, lebih baik hook dipasang saat proses target itu sendiri sedang dibuat,
-        // yang mungkin lebih sulit ditangkap di sini jika proses HAL bukan Zygote-forked app atau system_server.
-
-        // Untuk contoh ini, kita akan berasumsi hook open akan berjalan di proses yang relevan
-        // dan kita akan memfilter berdasarkan nama proses di dalam fungsi hook itu sendiri.
-        // Pendekatan yang lebih baik adalah menggunakan Zygisk API untuk hook pada saat proses target di-fork.
-        // Namun, xhook bekerja dengan me-resolve simbol saat runtime, jadi kita bisa menginisialisasinya
-        // dan hook akan aktif ketika library target (libc.so) dimuat oleh proses target.
-        
-        // Kita akan panggil apply_fp_experiment_hooks dengan nama proses yang kita ketahui adalah TARGET.
-        // Ini berarti kita MENGASUMSIKAN bahwa ketika TARGET_FP_SERVICE_PROCESS_NAME
-        // dimulai, libc.so akan dimuat dan xhook akan bisa bekerja.
-        // Cara yang lebih Zygisk-native adalah menggunakan api->hookJniNativeMethods atau api->pltHookRegister
-        // jika Anda tahu simbol spesifik di library target, atau men-patch ELF.
-        // Karena xhook sudah ada, kita coba manfaatkan.
-
-        LOGI("preServerSpecialize called. Applying hooks for potential HAL process.");
-        // Karena xhook me-resolve simbol saat runtime, kita daftarkan saja.
-        // Pemfilteran nama proses akan dilakukan di dalam fungsi hook `open`.
-        // Ini akan meng-hook `open` di semua proses yang di-fork dari Zygote yang memuat libc.so,
-        // jadi pemfilteran di dalam `hooked_open_fp_experiment` sangat penting.
-        // Atau, kita bisa pasang hook di sini dan berharap proses HAL akan kena.
-        
-        // Untuk kesederhanaan, kita pasang hook secara global dan filter di dalam fungsi hook
-        // Ini kurang ideal untuk Zygisk, tapi memanfaatkan xhook yang ada.
-        apply_global_fp_hooks();
+        LOGI("preServerSpecialize called. Current UID: %d. Is system server: %d", getuid(), args->uid);
+        // Jika TARGET_PROCESS_NICE_NAME adalah "system_server" dan Anda ingin hook di sana:
+        // if (strcmp(TARGET_PROCESS_NICE_NAME, "system_server") == 0 && !hooks_applied_to_target) {
+        //     LOGI("Target process 'system_server' detected in preServerSpecialize. Applying PLT hooks to libc.so.");
+        //     // Logika hook yang sama seperti di postAppSpecialize
+        // }
     }
 
 private:
-    zygisk::Api* api;
-    JNIEnv* env;
-
-    void apply_global_fp_hooks() {
-        if (hook_applied_fp_experiment) {
-            LOGI("Global FP Experiment hooks already applied, skipping");
-            return;
-        }
-        LOGI("Installing Global FP Experiment hooks (will filter by process name inside hook)");
-        
-        const char* pattern_libc = "libc\\.so$"; 
-
-        int ret_open = xhook_register(pattern_libc, "open",
-            (void*)hooked_open_fp_experiment, (void**)&orig_open);
-        int ret_open64 = xhook_register(pattern_libc, "open64",
-            (void*)hooked_open64_fp_experiment, (void**)&orig_open64);
-
-        int ret_refresh = xhook_refresh(0);
-
-        bool success = (ret_open == 0) && (ret_open64 == 0) && (ret_refresh == 0);
-
-        if (success) {
-            LOGI("Global FP Experiment hook registration completed successfully!");
-            hook_applied_fp_experiment = true;
-        } else {
-            LOGE("Failed to apply one or more Global FP Experiment hooks!");
-            if (ret_open != 0) LOGE("Global open hook failed: %d", ret_open);
-            if (ret_open64 != 0) LOGE("Global open64 hook failed: %d", ret_open64);
-            if (ret_refresh != 0) LOGE("Global xhook_refresh failed: %d", ret_refresh);
-        }
-    }
+    zygisk::Api* api = nullptr;
+    JNIEnv* env = nullptr;
 };
 
-// Daftarkan modul Zygisk Anda
-REGISTER_ZYGISK_MODULE(MyModule)
+REGISTER_ZYGISK_MODULE(FPCGoodixExperimentModule)
+```
 
-// Jika Anda ingin mengaktifkan hook saat library dimuat (misalnya, jika di-inject ke proses tertentu nanti)
-// Anda bisa menggunakan __attribute__((constructor))
-// __attribute__((constructor)) static void onLibraryLoad() {
-//    const char* proc_name = get_current_process_name_fp();
-//    if (strcmp(proc_name, TARGET_FP_SERVICE_PROCESS_NAME) == 0) {
-//       LOGI("FP Experiment Library loaded into target process: %s", proc_name);
-//       apply_fp_experiment_hooks(proc_name);
-//    } else {
-//       LOGI("FP Experiment Library loaded into non-target process: %s", proc_name);
-//    }
-// }
+**Penjelasan dan Catatan Penting:**
+
+1.  **`LOG_TAG`**: Diubah menjadi "FingerprintFPCExperiment" agar mudah difilter.
+2.  **`TARGET_PROCESS_NICE_NAME`**:
+    * Ini **sangat krusial**. Anda harus menggantinya dengan nama proses yang benar yang menjalankan service HAL sidik jari utama (`/vendor/bin/hw/android.hardware.biometrics.fingerprint@2.1-service`) sebagaimana nama itu muncul di `args->nice_name` saat `postAppSpecialize` dipanggil untuk proses tersebut.
+    * **Cara Menemukannya**: Tambahkan log di `postAppSpecialize` untuk mencetak `current_process_nice_name_str` dari *semua* proses. Kemudian, saat Anda tahu PID dari service HAL Anda (misalnya 1388 dari logcat sebelumnya), cari di log Zygisk nama apa yang muncul untuk PID tersebut atau untuk service yang relevan. Service native yang di-fork oleh `init` mungkin tidak selalu melewati `postAppSpecialize` dengan `nice_name` yang mudah ditebak. Jika service HAL Anda tidak di-fork dari Zygote dengan cara ini, pendekatan Zygisk ini mungkin tidak akan meng-hooknya.
+3.  **`hooks_applied_to_target`**: Flag boolean untuk memastikan kita hanya mencoba memasang hook sekali untuk proses target.
+4.  **Hook di `postAppSpecialize`**:
+    * Ini adalah tempat yang lebih baik untuk hook yang spesifik proses aplikasi atau service yang di-spawn seperti aplikasi.
+    * Kita membandingkan `current_process_nice_name_str` dengan `TARGET_PROCESS_NICE_NAME`.
+    * Jika cocok, kita menggunakan `api->pltHookRegister` untuk meng-hook `open` dan `open64` di `libc.so` yang dimuat oleh **proses target tersebut saja**. Ini jauh lebih aman daripada hook global.
+5.  **Fungsi Hook (`hooked_open_for_experiment`, `hooked_open64_for_experiment`)**:
+    * Mencatat path yang diminta.
+    * Jika path adalah `"/dev/goodix_fp"`, ia akan mencatat ini, membuka `/dev/null` menggunakan fungsi asli (`original_open` atau `original_open64`), dan mengembalikan file descriptor dari `/dev/null`.
+    * Untuk path lain, ia memanggil fungsi asli.
+6.  **`preServerSpecialize`**: Saya biarkan kosong untuk logika hook utama karena service HAL fingerprint biasanya bukan `system_server` itu sendiri, melainkan proses native terpisah. Jika ternyata `system_server` yang melakukan panggilan `open` ke `/dev/goodix_fp` yang ingin Anda cegat, Anda bisa memindahkan logika hook ke sini dan menargetkan `system_server`.
+7.  **Tidak Ada `get_current_process_name_fp()` di Dalam Fungsi Hook**: Karena hook sekarang dipasang secara spesifik untuk proses target, kita tidak perlu lagi memeriksa nama proses di dalam setiap panggilan `open`, yang menghilangkan potensi overhead dan bootloop dari sana.
+
+**Langkah Menggunakan Kode Ini (di Perangkat FPC Anda):**
+
+1.  **Identifikasi Nama Proses Target yang Benar**: Ini langkah pertama yang paling penting. Gunakan modul Zygisk yang hanya mencatat `args->nice_name` di `postAppSpecialize` untuk semua proses, lalu temukan nama yang sesuai untuk service HAL sidik jari Anda.
+2.  **Sesuaikan `TARGET_PROCESS_NICE_NAME`** di kode di atas.
+3.  **Build Modul Zygisk**.
+4.  **Instal dan Aktifkan** di Magisk, lalu **Reboot**.
+5.  **Amati Logcat dengan Cermat**:
+    * Filter dengan TAG `FingerprintFPCExperiment`.
+    * Apakah Anda melihat log "Target process '...' detected..."?
+    * Apakah Anda melihat log "Registered PLT hooks..." dan "PLT hooks committed successfully..."?
+    * Ketika Anda mencoba menggunakan sidik jari (yang seharusnya memicu logika trial-and-error HAL), apakah Anda melihat log "Intercepted open for /dev/goodix\_fp..."?
+    * **Log apa yang muncul dari `[GF_HAL]` (jika ada) atau service HAL utama setelah itu?** Apakah ia mencoba operasi TEE? Apakah ada error baru?
+    * Apakah fingerprint FPC Anda berhenti berfungsi (kemungkinan besar iya)?
+
+Ini adalah eksperimen yang lebih aman dan lebih terarah daripada hook global. Semoga berhas
