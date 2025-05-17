@@ -1,3 +1,4 @@
+#include "xhook.h"
 #include <cstdlib>
 #include <unistd.h>
 #include <fcntl.h>
@@ -5,12 +6,7 @@
 #include <string>
 #include <dlfcn.h> // Untuk definisi dlopen, dlsym (meskipun xhook menanganinya)
 #include <thread>  // Untuk std::thread
-
-// Sertakan header API Zygisk
 #include "zygisk.hpp"
-
-// Sertakan header xhook
-#include "xhook.h" // Pastikan path ini benar sesuai struktur proyek Anda
 
 #define LOG_TAG "MyFingerprintXHookLog" // Tag log
 #define ALOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
