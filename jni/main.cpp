@@ -2,234 +2,324 @@
 #include <unistd.h>
 #include <cstdlib>
 #include <android/log.h>
-#include <xhook.h>
-#include <sys/system_properties.h>
+#include <xhook.h> // Anda sudah menggunakan xhook
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <stdio.h>
-#include "zygisk.hpp"
+#include "zygisk.hpp" // Asumsi ini adalah header Zygisk dari template Anda
 
-#define LOG_TAG "SnapdragonSpoof"
+#define LOG_TAG "FingerprintHALExperiment" // Ganti LOG_TAG
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-// Target packages: hanya game & benchmarking, JANGAN proses sistem!
-static const char *target_packages[] = {
-    "com.tencent.ig", "com.pubg.imobile", "com.pubg.krmobile", "com.vng.pubgmobile", "com.rekoo.pubgm",
-    "com.tencent.tmgp.pubgmhd", "com.pubg.newstate", "flar2.devcheck", "com.antutu.ABenchMark",
-    "com.primatelabs.geekbench", "com.mobile.legends", "com.miHoYo.GenshinImpact",
-    "com.miHoYo.Yuanshen", "com.miHoYo.honkaiimpact3", "com.miHoYo.bh3.global", "com.miHoYo.bh3.eur",
-    "com.hoyoverse.hkrpg.global", "com.miHoYo.hkrpg", "com.hoyoverse.hkrpgoversea",
-    "com.activision.callofduty.shooter", "com.garena.game.codm", "com.tencent.tmgp.cod",
-    "com.ea.gp.apexlegendsmobilefps", "com.epicgames.fortnite", "com.netease.party.m",
-    "com.netease.marvel.marvelsuperwarglobal", "com.supercell.brawlstars", "com.dts.freefireth",
-    "com.dts.freefiremax", "com.riotgames.league.wildrift", "com.riotgames.legendsofruneterra",
-    "com.riotgames.tacticiansandroid"
-};
-static const size_t target_packages_count = sizeof(target_packages) / sizeof(target_packages[0]);
+// ----- HAPUS BAGIAN SnapdragonSpoof -----
+// static const char *target_packages[] = { ... };
+// static const size_t target_packages_count = ...;
+// static const char *spoofed_props[][2] = { ... };
+// static const size_t spoofed_props_count = ...;
+// -----------------------------------------
 
-// Spoof semua properti SoC yang umum diakses aplikasi hardware info
-static const char *spoofed_props[][2] = {
-    {"ro.hardware.chipset", "Snapdragon 8 Gen 3"},
-    {"ro.hardware.chipname", "SM8650-AC"},
-    {"ro.chipname", "SM8650-AC"},
-    {"ro.soc.model", "SM8650"},
-    {"ro.soc.manufacturer", "Qualcomm"},
-    {"ro.vendor.soc.model.external_name", "SM8650-AC"},
-    {"ro.vendor.soc.model.part_name", "SM8650-AC"}
-};
-static const size_t spoofed_props_count = sizeof(spoofed_props) / sizeof(spoofed_props[0]);
+// Nama proses target untuk hook open (ini perlu disesuaikan/diverifikasi)
+// Biner service HAL utama Anda adalah target yang paling mungkin.
+// Jika tidak tahu pasti, Anda bisa meng-hook di system_server dan melihat apakah [GF_HAL] berjalan di sana,
+// atau mencoba menebak nama proses daemon HAL.
+// Contoh: "/vendor/bin/hw/android.hardware.biometrics.fingerprint@2.1-service"
+// atau "system_server" jika pemeriksaan device node terjadi di sana.
+// Untuk eksperimen awal, mungkin lebih aman menargetkan proses HAL spesifik jika diketahui.
+// Jika tidak, menargetkan semua proses dengan xhook (pattern ".*") akan terlalu luas dan berisiko.
+// Kita akan mencoba menargetkan library libc.so secara umum untuk fungsi open,
+// dan memfilter berdasarkan nama proses di dalam fungsi hook.
+static const char *TARGET_FP_SERVICE_PROCESS_NAME = "/vendor/bin/hw/android.hardware.biometrics.fingerprint@2.1-service";
+// Alternatif jika GF_HAL adalah bagian dari proses lain:
+// static const char *TARGET_FP_SERVICE_PROCESS_NAME_ALT = "nama_proses_gf_hal_jika_berbeda";
+
 
 // Original function pointers
-static int (*orig___system_property_get)(const char *name, char *value) = nullptr;
-static int (*orig___system_property_read)(const prop_info *pi, char *name, char *value) = nullptr;
-static int (*orig___system_property_read_callback)(const prop_info *pi,
-    void (*callback)(void *cookie, const char *name, const char *value, uint32_t serial), void *cookie) = nullptr;
+static int (*orig_open)(const char* pathname, int flags, ...) = nullptr;
+// Mungkin juga perlu open64 jika sistem menggunakan itu untuk path /dev
+static int (*orig_open64)(const char* pathname, int flags, ...) = nullptr;
+// Mungkin juga access atau stat, tapi kita mulai dengan open.
+// static int (*orig_access)(const char *pathname, int mode) = nullptr;
 
-// Per-process flag
-static bool enable_spoof = false;
-static bool hook_applied = false;
-static char current_process_name[256] = {0};
 
-// Utility untuk mendapatkan nama proses
-static const char* get_process_name() {
-    if (current_process_name[0] != '\0') {
-        return current_process_name;
+static bool hook_applied_fp_experiment = false;
+static char current_process_name_fp_exp[256] = {0};
+
+// Utility untuk mendapatkan nama proses (sudah ada di template Anda, bisa dipakai ulang)
+static const char* get_current_process_name_fp() {
+    if (current_process_name_fp_exp[0] != '\0') {
+        return current_process_name_fp_exp;
     }
-    int fd = open("/proc/self/cmdline", O_RDONLY);
-    if (fd >= 0) {
-        ssize_t len = read(fd, current_process_name, sizeof(current_process_name) - 1);
-        close(fd);
-        if (len > 0) {
-            current_process_name[len] = '\0';
-            LOGI("Got process name from cmdline: %s", current_process_name);
-            return current_process_name;
+    FILE* cmdline = fopen("/proc/self/cmdline", "r");
+    if (cmdline) {
+        fgets(current_process_name_fp_exp, sizeof(current_process_name_fp_exp), cmdline);
+        fclose(cmdline);
+        // Hapus newline jika ada
+        char* newline = strchr(current_process_name_fp_exp, '\n');
+        if (newline) *newline = '\0';
+        
+        // cmdline bisa berisi argumen lain setelah null terminator pertama,
+        // jadi pastikan kita hanya mengambil bagian pertama.
+        // Atau bisa juga seperti ini untuk kasus path biner absolut:
+        if (strlen(current_process_name_fp_exp) == 0) { // Jika cmdline kosong, coba readlink /proc/self/exe
+             ssize_t len = readlink("/proc/self/exe", current_process_name_fp_exp, sizeof(current_process_name_fp_exp) - 1);
+             if (len > 0) {
+                 current_process_name_fp_exp[len] = '\0';
+             }
+        }
+
+        LOGI("Current process name (fp_exp): %s", current_process_name_fp_exp);
+        return current_process_name_fp_exp;
+    }
+    LOGE("Failed to get process name (fp_exp)");
+    return "unknown_process";
+}
+
+
+// Hook for open
+extern "C" int hooked_open_fp_experiment(const char* pathname, int flags, ...) {
+    mode_t mode = 0;
+    // O_CREAT adalah salah satu flag yang membutuhkan argumen mode ketiga
+    if ((flags & O_CREAT) == O_CREAT) {
+        va_list args;
+        va_start(args, flags);
+        mode = (mode_t)va_arg(args, int); // mode_t sering di-pass sebagai int
+        va_end(args);
+    }
+
+    const char* current_proc = get_current_process_name_fp();
+    bool is_target_process = (strcmp(current_proc, TARGET_FP_SERVICE_PROCESS_NAME) == 0);
+                               // Tambahkan || strcmp(current_proc, TARGET_FP_SERVICE_PROCESS_NAME_ALT) == 0 jika ada alternatif
+
+    if (is_target_process && pathname && strcmp(pathname, "/dev/goodix_fp") == 0) {
+        LOGI("hooked_open_fp_experiment: Intercepted open for /dev/goodix_fp in target process %s. Flags: %d", current_proc, flags);
+        
+        // Strategi: Kembalikan FD dari /dev/null agar pemeriksaan "keberadaan" berhasil,
+        // tetapi operasi selanjutnya pada FD ini kemungkinan akan gagal atau tidak berarti.
+        // Ini akan menguji apakah [GF_HAL] melanjutkan jika ia mengira device node ada.
+        int fd_dev_null = -1;
+        if (orig_open) { // Panggil open asli untuk /dev/null
+             fd_dev_null = orig_open("/dev/null", O_RDWR); 
+        }
+        LOGI("hooked_open_fp_experiment: For /dev/goodix_fp, returning FD of /dev/null: %d", fd_dev_null);
+        return fd_dev_null;
+    }
+
+    // Panggil fungsi open asli untuk path lain atau proses lain
+    if (orig_open) {
+        if ((flags & O_CREAT) == O_CREAT) {
+            return orig_open(pathname, flags, mode);
+        } else {
+            return orig_open(pathname, flags);
         }
     }
-    const char* progname = getprogname();
-    if (progname) {
-        strncpy(current_process_name, progname, sizeof(current_process_name) - 1);
-        LOGI("Got process name from getprogname: %s", current_process_name);
-        return current_process_name;
-    }
-    LOGE("Failed to get process name");
-    return "unknown";
+    // Fallback jika orig_open tidak ter-resolve (seharusnya tidak terjadi jika xhook berhasil)
+    LOGE("hooked_open_fp_experiment: orig_open is null!");
+    errno = EACCES; // Kembalikan error yang masuk akal
+    return -1;
 }
 
-// Deteksi target hanya sekali di awal proses
-static void detect_if_target_process(const char* process_name) {
-    enable_spoof = false;
-    if (!process_name || strlen(process_name) == 0) return;
-    for (size_t i = 0; i < target_packages_count; i++) {
-        if (strcmp(process_name, target_packages[i]) == 0 ||
-            strstr(process_name, target_packages[i]) != NULL) {
-            enable_spoof = true;
-            LOGI("Detected target app: %s (spoof enabled)", process_name);
-            return;
+// Hook untuk open64 (sering digunakan untuk file besar atau device node)
+extern "C" int hooked_open64_fp_experiment(const char* pathname, int flags, ...) {
+    mode_t mode = 0;
+    if ((flags & O_CREAT) == O_CREAT) {
+        va_list args;
+        va_start(args, flags);
+        mode = (mode_t)va_arg(args, int);
+        va_end(args);
+    }
+
+    const char* current_proc = get_current_process_name_fp();
+    bool is_target_process = (strcmp(current_proc, TARGET_FP_SERVICE_PROCESS_NAME) == 0);
+
+    if (is_target_process && pathname && strcmp(pathname, "/dev/goodix_fp") == 0) {
+        LOGI("hooked_open64_fp_experiment: Intercepted open64 for /dev/goodix_fp in target process %s. Flags: %d", current_proc, flags);
+        int fd_dev_null = -1;
+        if (orig_open64) {
+             fd_dev_null = orig_open64("/dev/null", O_RDWR);
+        } else if (orig_open) { // Fallback ke orig_open jika orig_open64 tidak dihook/ditemukan
+             fd_dev_null = orig_open("/dev/null", O_RDWR);
+        }
+        LOGI("hooked_open64_fp_experiment: For /dev/goodix_fp, returning FD of /dev/null: %d", fd_dev_null);
+        return fd_dev_null;
+    }
+
+    if (orig_open64) {
+        if ((flags & O_CREAT) == O_CREAT) {
+            return orig_open64(pathname, flags, mode);
+        } else {
+            return orig_open64(pathname, flags);
+        }
+    } else if (orig_open) { // Fallback jika orig_open64 tidak dihook/ditemukan
+         if ((flags & O_CREAT) == O_CREAT) {
+            return orig_open(pathname, flags, mode);
+        } else {
+            return orig_open(pathname, flags);
         }
     }
-    LOGI("Not target app: %s (spoof disabled)", process_name);
+    LOGE("hooked_open64_fp_experiment: orig_open64 (and orig_open) is null!");
+    errno = EACCES;
+    return -1;
 }
 
-// should_spoof cukup cek flag
-static bool should_spoof() {
-    return enable_spoof;
-}
 
-// Find spoofed property value
-static bool find_spoofed_prop(const char *name, char *value) {
-    for (size_t i = 0; i < spoofed_props_count; i++) {
-        if (strcmp(name, spoofed_props[i][0]) == 0) {
-            strcpy(value, spoofed_props[i][1]);
-            return true;
-        }
-    }
-    return false;
-}
-
-// Hook for __system_property_get
-extern "C" int my___system_property_get(const char *name, char *value) {
-    int ret = orig___system_property_get(name, value);
-    if (should_spoof()) {
-        if (find_spoofed_prop(name, value)) {
-            LOGI("Spoofed property get: %s -> %s", name, value);
-            return strlen(value);
-        }
-    }
-    return ret;
-}
-
-// Hook for __system_property_read
-extern "C" int my___system_property_read(const prop_info *pi, char *name, char *value) {
-    int ret = orig___system_property_read(pi, name, value);
-    if (should_spoof() && ret > 0) {
-        char spoofed_value[PROP_VALUE_MAX];
-        if (find_spoofed_prop(name, spoofed_value)) {
-            strcpy(value, spoofed_value);
-            LOGI("Spoofed property read: %s -> %s", name, value);
-        }
-    }
-    return ret;
-}
-
-// Callback wrapper for __system_property_read_callback
-struct CallbackInfo {
-    void (*orig_callback)(void *cookie, const char *name, const char *value, uint32_t serial);
-    void *orig_cookie;
-};
-
-static void callback_wrapper(void *cookie, const char *name, const char *value, uint32_t serial) {
-    CallbackInfo *info = static_cast<CallbackInfo*>(cookie);
-    char spoofed_value[PROP_VALUE_MAX];
-    const char *final_value = value;
-    if (should_spoof() && find_spoofed_prop(name, spoofed_value)) {
-        final_value = spoofed_value;
-        LOGI("Spoofed property callback: %s -> %s", name, final_value);
-    }
-    info->orig_callback(info->orig_cookie, name, final_value, serial);
-    delete info;
-}
-
-// Hook for __system_property_read_callback
-extern "C" int my___system_property_read_callback(const prop_info *pi,
-    void (*callback)(void *cookie, const char *name, const char *value, uint32_t serial),
-    void *cookie) {
-    if (!should_spoof()) {
-        return orig___system_property_read_callback(pi, callback, cookie);
-    }
-    CallbackInfo *info = new CallbackInfo{callback, cookie};
-    return orig___system_property_read_callback(pi, callback_wrapper, info);
-}
-
-// Inisialisasi xhook dan menerapkan hook (pattern HANYA libc.so)
-static bool apply_hooks() {
-    if (hook_applied) {
-        LOGI("Hooks already applied, skipping");
-        return true;
-    }
-    LOGI("Installing hooks for process: %s", get_process_name());
-    xhook_clear();
-
-    const char* pattern_libc = "libc\\.so$";
-
-    int ret1 = xhook_register(pattern_libc, "__system_property_get",
-        (void*)my___system_property_get, (void**)&orig___system_property_get);
-    int ret2 = xhook_register(pattern_libc, "__system_property_read",
-        (void*)my___system_property_read, (void**)&orig___system_property_read);
-    int ret3 = xhook_register(pattern_libc, "__system_property_read_callback",
-        (void*)my___system_property_read_callback, (void**)&orig___system_property_read_callback);
-
-    int ret = xhook_refresh(0);
-
-    bool success = (ret1 == 0) && (ret2 == 0) && (ret3 == 0) && (ret == 0);
-
-    if (success) {
-        LOGI("Spoof hook injection completed successfully!");
-        hook_applied = true;
-    } else {
-        LOGE("Failed to apply one or more hooks!");
-        if (ret1 != 0) LOGE("__system_property_get hook failed: %d", ret1);
-        if (ret2 != 0) LOGE("__system_property_read hook failed: %d", ret2);
-        if (ret3 != 0) LOGE("__system_property_read_callback hook failed: %d", ret3);
-        if (ret != 0) LOGE("xhook_refresh failed: %d", ret);
-    }
-    return success;
-}
-
-// Inisialisasi spoofer
-extern "C" void init_snapdragon_spoof() {
-    LOGI("Initializing Snapdragon Spoofer");
-    char sdk_ver[PROP_VALUE_MAX] = {0};
-    __system_property_get("ro.build.version.sdk", sdk_ver);
-    LOGI("Android SDK version: %s", sdk_ver);
-
-    const char* proc_name = get_process_name();
-    detect_if_target_process(proc_name);
-    if (should_spoof()) {
-        LOGI("Target process detected during init: %s", proc_name);
-        apply_hooks();
-    }
-}
-
-// Fungsi untuk mengecek dan memasang hook hanya di target
-extern "C" void apply_hooks_if_target_app(const char* process_name) {
-    LOGI("apply_hooks_if_target_app called: [%s]", process_name ? process_name : "NULL");
-    if (process_name && strlen(process_name) > 0) {
-        strncpy(current_process_name, process_name, sizeof(current_process_name) - 1);
-    }
-    detect_if_target_process(current_process_name);
-    if (!should_spoof()) {
-        LOGI("Not a target app, skipping: %s", process_name ? process_name : "NULL");
+static void apply_fp_experiment_hooks(const char* process_name) {
+    if (hook_applied_fp_experiment) {
+        // LOGI("FP Experiment hooks already applied for %s, skipping", process_name);
         return;
     }
-    apply_hooks();
-    if (hook_applied) {
-        LOGI("Verifying hook effectiveness");
-        // Cek semua properti yang di-spoof
-        for (size_t i = 0; i < spoofed_props_count; ++i) {
-            char value[PROP_VALUE_MAX] = {0};
-            __system_property_get(spoofed_props[i][0], value);
-            LOGI("Test read %s: %s", spoofed_props[i][0], value);
-        }
+
+    // Hanya pasang hook jika ini adalah proses target kita
+    if (strcmp(process_name, TARGET_FP_SERVICE_PROCESS_NAME) != 0) {
+        // LOGI("Not the target FP service process (%s), skipping hooks.", process_name);
+        return;
+    }
+    
+    LOGI("Installing FP Experiment hooks for process: %s", process_name);
+    // xhook_clear(); // Hati-hati jika ada hook lain yang ingin dipertahankan dari template asli.
+                   // Jika ini satu-satunya set hook, maka clear OK. Jika tidak, jangan clear.
+                   // Untuk sekarang, kita asumsikan kita ingin mengganti semua logika hook.
+    
+    // Kita akan hook libc.so karena 'open' adalah fungsi libc standar
+    const char* pattern_libc = "libc\\.so$"; 
+    // Atau bisa juga ".*" untuk semua library, tapi lebih baik spesifik jika memungkinkan.
+    // Jika service HAL di-link secara statis dengan libc versi lain, pattern perlu disesuaikan.
+
+    int ret_open = xhook_register(pattern_libc, "open",
+        (void*)hooked_open_fp_experiment, (void**)&orig_open);
+    int ret_open64 = xhook_register(pattern_libc, "open64",
+        (void*)hooked_open64_fp_experiment, (void**)&orig_open64);
+
+    // Anda juga bisa menambahkan hook untuk "access" atau "stat" jika 'open' tidak cukup
+    // int ret_access = xhook_register(pattern_libc, "access", ...);
+
+    int ret_refresh = xhook_refresh(0); // Terapkan semua hook yang terdaftar
+
+    bool success = (ret_open == 0) && (ret_open64 == 0) && (ret_refresh == 0);
+
+    if (success) {
+        LOGI("FP Experiment hook injection completed successfully for %s!", process_name);
+        hook_applied_fp_experiment = true;
+    } else {
+        LOGE("Failed to apply one or more FP Experiment hooks for %s!", process_name);
+        if (ret_open != 0) LOGE("open hook failed: %d", ret_open);
+        if (ret_open64 != 0) LOGE("open64 hook failed: %d", ret_open64);
+        if (ret_refresh != 0) LOGE("xhook_refresh failed: %d", ret_refresh);
     }
 }
+
+// Anda perlu cara untuk memanggil apply_fp_experiment_hooks
+// dari dalam fungsi yang disediakan Zygisk (misalnya preAppSpecialize atau preServerSpecialize)
+// dan hanya untuk proses target.
+
+class MyModule : public zygisk::ModuleBase {
+public:
+    void onLoad(zygisk::Api* api, JNIEnv* env) override {
+        this->api = api;
+        this->env = env;
+        LOGI("FingerprintHALExperiment Zygisk module loaded");
+    }
+
+    // Hook untuk proses aplikasi (termasuk beberapa proses sistem yang di-fork dari Zygote seperti aplikasi)
+    void preAppSpecialize(zygisk::AppSpecializeArgs* args) override {
+        const char* process_name = env->GetStringUTFChars(args->nice_name, nullptr);
+        if (process_name) {
+            // Simpan nama proses untuk digunakan nanti jika perlu
+            strncpy(current_process_name_fp_exp, process_name, sizeof(current_process_name_fp_exp) -1);
+            current_process_name_fp_exp[sizeof(current_process_name_fp_exp)-1] = '\0';
+
+            // Kita lebih tertarik pada proses HAL native atau system_server
+            // jadi mungkin tidak melakukan hook di sini, kecuali jika proses HAL di-spawn sebagai app.
+            // Untuk sekarang, kita coba hook di preServerSpecialize juga.
+            // LOGI("preAppSpecialize: process_name=%s, uid=%d", process_name, args->uid);
+            
+            // Jika service HAL berjalan sebagai proses aplikasi biasa (jarang untuk HAL sistem)
+            // if (strcmp(process_name, TARGET_FP_SERVICE_PROCESS_NAME) == 0) {
+            //     apply_fp_experiment_hooks(process_name);
+            // }
+            env->ReleaseStringUTFChars(args->nice_name, process_name);
+        }
+    }
+    
+    // Hook untuk system_server
+    void preServerSpecialize(zygisk::ServerSpecializeArgs* args) override {
+        // system_server adalah kandidat kuat jika pengecekan device node terjadi di framework Java
+        // atau jika service HAL di-load dari dalam system_server.
+        // Namun, service HAL fingerprint biasanya berjalan sebagai prosesnya sendiri.
+        // Kita akan tetap mencoba mendapatkan nama proses aktual di mana hook open akan berjalan.
+        // Untuk Zygisk, lebih baik hook dipasang saat proses target itu sendiri sedang dibuat,
+        // yang mungkin lebih sulit ditangkap di sini jika proses HAL bukan Zygote-forked app atau system_server.
+
+        // Untuk contoh ini, kita akan berasumsi hook open akan berjalan di proses yang relevan
+        // dan kita akan memfilter berdasarkan nama proses di dalam fungsi hook itu sendiri.
+        // Pendekatan yang lebih baik adalah menggunakan Zygisk API untuk hook pada saat proses target di-fork.
+        // Namun, xhook bekerja dengan me-resolve simbol saat runtime, jadi kita bisa menginisialisasinya
+        // dan hook akan aktif ketika library target (libc.so) dimuat oleh proses target.
+        
+        // Kita akan panggil apply_fp_experiment_hooks dengan nama proses yang kita ketahui adalah TARGET.
+        // Ini berarti kita MENGASUMSIKAN bahwa ketika TARGET_FP_SERVICE_PROCESS_NAME
+        // dimulai, libc.so akan dimuat dan xhook akan bisa bekerja.
+        // Cara yang lebih Zygisk-native adalah menggunakan api->hookJniNativeMethods atau api->pltHookRegister
+        // jika Anda tahu simbol spesifik di library target, atau men-patch ELF.
+        // Karena xhook sudah ada, kita coba manfaatkan.
+
+        LOGI("preServerSpecialize called. Applying hooks for potential HAL process.");
+        // Karena xhook me-resolve simbol saat runtime, kita daftarkan saja.
+        // Pemfilteran nama proses akan dilakukan di dalam fungsi hook `open`.
+        // Ini akan meng-hook `open` di semua proses yang di-fork dari Zygote yang memuat libc.so,
+        // jadi pemfilteran di dalam `hooked_open_fp_experiment` sangat penting.
+        // Atau, kita bisa pasang hook di sini dan berharap proses HAL akan kena.
+        
+        // Untuk kesederhanaan, kita pasang hook secara global dan filter di dalam fungsi hook
+        // Ini kurang ideal untuk Zygisk, tapi memanfaatkan xhook yang ada.
+        apply_global_fp_hooks();
+    }
+
+private:
+    zygisk::Api* api;
+    JNIEnv* env;
+
+    void apply_global_fp_hooks() {
+        if (hook_applied_fp_experiment) {
+            LOGI("Global FP Experiment hooks already applied, skipping");
+            return;
+        }
+        LOGI("Installing Global FP Experiment hooks (will filter by process name inside hook)");
+        
+        const char* pattern_libc = "libc\\.so$"; 
+
+        int ret_open = xhook_register(pattern_libc, "open",
+            (void*)hooked_open_fp_experiment, (void**)&orig_open);
+        int ret_open64 = xhook_register(pattern_libc, "open64",
+            (void*)hooked_open64_fp_experiment, (void**)&orig_open64);
+
+        int ret_refresh = xhook_refresh(0);
+
+        bool success = (ret_open == 0) && (ret_open64 == 0) && (ret_refresh == 0);
+
+        if (success) {
+            LOGI("Global FP Experiment hook registration completed successfully!");
+            hook_applied_fp_experiment = true;
+        } else {
+            LOGE("Failed to apply one or more Global FP Experiment hooks!");
+            if (ret_open != 0) LOGE("Global open hook failed: %d", ret_open);
+            if (ret_open64 != 0) LOGE("Global open64 hook failed: %d", ret_open64);
+            if (ret_refresh != 0) LOGE("Global xhook_refresh failed: %d", ret_refresh);
+        }
+    }
+};
+
+// Daftarkan modul Zygisk Anda
+REGISTER_ZYGISK_MODULE(MyModule)
+
+// Jika Anda ingin mengaktifkan hook saat library dimuat (misalnya, jika di-inject ke proses tertentu nanti)
+// Anda bisa menggunakan __attribute__((constructor))
+// __attribute__((constructor)) static void onLibraryLoad() {
+//    const char* proc_name = get_current_process_name_fp();
+//    if (strcmp(proc_name, TARGET_FP_SERVICE_PROCESS_NAME) == 0) {
+//       LOGI("FP Experiment Library loaded into target process: %s", proc_name);
+//       apply_fp_experiment_hooks(proc_name);
+//    } else {
+//       LOGI("FP Experiment Library loaded into non-target process: %s", proc_name);
+//    }
+// }
