@@ -16,7 +16,7 @@ include $(BUILD_STATIC_LIBRARY)
 # Modul utama Zygisk spoof s24
 include $(CLEAR_VARS)
 LOCAL_MODULE := zygisk_spoofs24
-LOCAL_SRC_FILES := main.cpp module.cpp
+LOCAL_SRC_FILES := main.cpp
 LOCAL_STATIC_LIBRARIES := xhook
 LOCAL_LDLIBS := -llog -ldl
 LOCAL_CFLAGS += -fno-rtti -fno-exceptions -DISABLE_DOBBY_HOOK -O0 -g
