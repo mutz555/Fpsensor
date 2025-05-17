@@ -82,7 +82,7 @@ static void do_hooking_with_xhook() {
     if (xhook_register(".*\\libdl.so$", "dlopen", (void*)my_dlopen_replacement, (void**)&original_dlopen_ptr) != 0 &&
         xhook_register(".*\\linker.*$", "dlopen", (void*)my_dlopen_replacement, (void**)&original_dlopen_ptr) != 0 && // Mencakup linker dan linker64
         xhook_register(".*\\libc.so$", "dlopen", (void*)my_dlopen_replacement, (void**)&original_dlopen_ptr) != 0 ) { // Beberapa implementasi libc mungkin juga mengeksposnya
-        ALOGW("Gagal mendaftarkan semua target hook untuk dlopen. Beberapa mungkin berhasil.");
+        ALOGE("Gagal mendaftarkan semua target hook untuk dlopen. Beberapa mungkin berhasil.");
         // Tidak langsung error karena salah satu mungkin sudah cukup, tergantung implementasi sistem.
     } else {
         ALOGI("Hook untuk dlopen berhasil didaftarkan (atau setidaknya satu upaya berhasil).");
@@ -92,7 +92,7 @@ static void do_hooking_with_xhook() {
     // Menyimpan pointer fungsi asli ke original_android_dlopen_ext_ptr
     if (xhook_register(".*\\libdl.so$", "android_dlopen_ext", (void*)my_android_dlopen_ext_replacement, (void**)&original_android_dlopen_ext_ptr) != 0 &&
         xhook_register(".*\\linker.*$", "android_dlopen_ext", (void*)my_android_dlopen_ext_replacement, (void**)&original_android_dlopen_ext_ptr) != 0) {
-        ALOGW("Gagal mendaftarkan semua target hook untuk android_dlopen_ext.");
+        ALOGE("Gagal mendaftarkan semua target hook untuk android_dlopen_ext.");
     } else {
         ALOGI("Hook untuk android_dlopen_ext berhasil didaftarkan (atau setidaknya satu upaya berhasil).");
     }
