@@ -1,14 +1,18 @@
-#include "xhook.h"
 #include <cstdlib>
 #include <unistd.h>
 #include <fcntl.h>
 #include <android/log.h>
 #include <string>
-#include <dlfcn.h> // Untuk definisi dlopen, dlsym (meskipun xhook menanganinya)
-#include <thread>  // Untuk std::thread
+#include <dlfcn.h> 
+#include <thread>  
+
+// Sertakan header API Zygisk
 #include "zygisk.hpp"
 
-#define LOG_TAG "MyFingerprintXHookLog" // Tag log
+// Sertakan header xhook
+#include "xhook.h" // Pastikan path ini benar sesuai struktur proyek Anda
+
+#define LOG_TAG "MyFingerprintXHookLog" 
 #define ALOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 #define ALOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define ALOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
@@ -16,62 +20,56 @@
 // Nama proses target
 const char *TARGET_PROCESS_NAME = "android.hardware.biometrics.fingerprint@2.1-service";
 
-// --- Definisi Fungsi Asli dan Pengganti untuk dlopen ---
-// Tanda tangan untuk dlopen
-typedef void* (*t_dlopen)(const char* filename, int flags);
-t_dlopen original_dlopen = nullptr; // Akan diisi oleh xhook
+// --- Definisi Pointer untuk Menyimpan Fungsi Asli ---
+// Tanda tangan dan pointer untuk dlopen asli
+typedef void* (*t_dlopen_orig)(const char* filename, int flags);
+static t_dlopen_orig original_dlopen_ptr = nullptr; 
 
+// Tanda tangan dan pointer untuk android_dlopen_ext asli
+typedef void* (*t_android_dlopen_ext_orig)(const char* filename, int flags, const void* extinfo /*android_dlextinfo*/);
+static t_android_dlopen_ext_orig original_android_dlopen_ext_ptr = nullptr;
+
+
+// --- Fungsi Pengganti (Hook) ---
 // Fungsi pengganti untuk dlopen
 void* my_dlopen_replacement(const char* filename, int flags) {
     ALOGI("XHOOKED_DLOPEN: Mencoba memuat filename='%s', flags=%d", filename, flags);
 
-    // Panggil fungsi asli (jika perlu, tapi xhook menangani pemanggilan asli secara internal
-    // saat Anda tidak secara eksplisit memanggil original_dlopen yang Anda simpan)
-    // Untuk logging saja, kita biarkan xhook memanggil yang asli setelah ini.
-    // Jika Anda ingin memodifikasi atau mendapatkan hasil sebelum kembali, Anda perlu
-    // mendapatkan pointer ke fungsi asli dari xhook atau mekanisme lain.
-    // Namun, untuk xhook, cara paling umum adalah membiarkannya memanggil yang asli
-    // dan kita hanya log di sini. Jika Anda perlu hasil, Anda harus menyimpannya
-    // dari xhook_call_orig.
-
-    // Untuk mendapatkan hasil dari fungsi asli menggunakan xhook, biasanya Anda tidak
-    // mendefinisikan ulang `original_dlopen` seperti ini. xhook akan memanggil
-    // fungsi asli setelah fungsi pengganti Anda selesai jika Anda tidak mengintervensi.
-    // Jika Anda *perlu* memanggil fungsi asli secara eksplisit dari dalam hook:
-    // void* result = xhook_call_orig(my_dlopen_replacement, filename, flags);
-    // ALOGI("XHOOKED_DLOPEN: Panggilan asli dlopen mengembalikan %p untuk filename='%s'", result, filename);
-    // return result;
-    // Untuk logging sederhana, kita tidak perlu memanggil xhook_call_orig secara manual di sini.
-
-    // Karena kita tidak memanggil xhook_call_orig secara eksplisit, kita tidak akan
-    // mendapatkan nilai kembalian di sini. xhook akan memanggil fungsi asli
-    // setelah fungsi pengganti ini selesai.
-    // Jika Anda ingin melihat nilai kembalian, Anda perlu meng-hook fungsi
-    // yang *menggunakan* hasil dari dlopen, atau menggunakan teknik yang lebih canggih
-    // dengan xhook untuk menangkap nilai kembalian.
-
-    // Untuk tujuan logging pemanggilan, ini sudah cukup.
-    // Jika Anda ingin MENGUBAH filename:
-    // const char* new_filename = filename;
-    // if (strcmp(filename, "path/ke/fpsensor.so") == 0) {
-    //     new_filename = "path/ke/goodix.so";
-    //     ALOGI("XHOOKED_DLOPEN: Mengganti filename dari '%s' ke '%s'", filename, new_filename);
-    // }
-    // return xhook_call_orig(my_dlopen_replacement, new_filename, flags); // Panggil asli dengan argumen baru
-
-    return xhook_call_orig(my_dlopen_replacement, filename, flags); // Panggil fungsi asli dengan argumen asli
+    // Panggil fungsi asli menggunakan pointer yang disimpan oleh xhook
+    if (original_dlopen_ptr) {
+        // Jika Anda ingin memodifikasi filename sebelum memanggil yang asli:
+        // const char* new_filename = filename;
+        // if (strcmp(filename, "path/yang/ingin/diubah.so") == 0) {
+        //     new_filename = "path/baru.so";
+        //     ALOGI("XHOOKED_DLOPEN: Mengganti filename dari '%s' ke '%s'", filename, new_filename);
+        // }
+        // void* result = original_dlopen_ptr(new_filename, flags);
+        
+        void* result = original_dlopen_ptr(filename, flags);
+        ALOGI("XHOOKED_DLOPEN: Panggilan asli dlopen mengembalikan %p untuk filename='%s'", result, filename);
+        return result;
+    } else {
+        ALOGE("XHOOKED_DLOPEN: original_dlopen_ptr tidak diset! Tidak bisa memanggil fungsi asli.");
+        // Fallback atau penanganan error, misalnya dengan mengembalikan nullptr
+        // atau mencoba memanggil dlopen sistem secara langsung (meskipun ini mungkin berisiko jika hook diharapkan aktif)
+        // return dlopen(filename, flags); // Hati-hati dengan pemanggilan rekursif jika hook gagal total
+        return nullptr;
+    }
 }
-
-// --- Definisi Fungsi Asli dan Pengganti untuk android_dlopen_ext ---
-typedef void* (*t_android_dlopen_ext)(const char* filename, int flags, const void* extinfo /*android_dlextinfo*/);
-// original_android_dlopen_ext tidak perlu didefinisikan jika kita menggunakan xhook_call_orig
 
 // Fungsi pengganti untuk android_dlopen_ext
 void* my_android_dlopen_ext_replacement(const char* filename, int flags, const void* extinfo) {
     ALOGI("XHOOKED_ADLOPEN: Mencoba memuat filename='%s', flags=%d, extinfo=%p", filename, flags, extinfo);
 
-    // Panggil fungsi asli dengan argumen asli
-    return xhook_call_orig(my_android_dlopen_ext_replacement, filename, flags, extinfo);
+    // Panggil fungsi asli menggunakan pointer yang disimpan oleh xhook
+    if (original_android_dlopen_ext_ptr) {
+        void* result = original_android_dlopen_ext_ptr(filename, flags, extinfo);
+        ALOGI("XHOOKED_ADLOPEN: Panggilan asli android_dlopen_ext mengembalikan %p untuk filename='%s'", result, filename);
+        return result;
+    } else {
+        ALOGE("XHOOKED_ADLOPEN: original_android_dlopen_ext_ptr tidak diset! Tidak bisa memanggil fungsi asli.");
+        return nullptr;
+    }
 }
 
 
@@ -79,39 +77,36 @@ static void do_hooking_with_xhook() {
     ALOGI("Memulai proses hooking dengan xhook untuk %s", TARGET_PROCESS_NAME);
 
     // Hook dlopen
-    // Argumen ketiga adalah pointer ke fungsi pengganti kita.
-    // Argumen keempat (opsional) bisa menjadi pointer untuk menyimpan fungsi asli jika diperlukan.
-    // Untuk xhook, jika argumen keempat NULL, xhook akan menangani pemanggilan fungsi asli.
-    if (xhook_register(".*\\libdl.so$", "dlopen", (void*)my_dlopen_replacement, nullptr) != 0 &&
-        xhook_register(".*\\linker$", "dlopen", (void*)my_dlopen_replacement, nullptr) != 0 && // Linker juga bisa menyediakan dlopen
-        xhook_register(".*\\libc.so$", "dlopen", (void*)my_dlopen_replacement, nullptr) != 0) { // Kadang di libc juga
-        ALOGE("Gagal mendaftarkan hook untuk dlopen");
+    // Regex bisa disesuaikan jika perlu lebih spesifik atau lebih umum
+    // Menyimpan pointer fungsi asli ke original_dlopen_ptr
+    if (xhook_register(".*\\libdl.so$", "dlopen", (void*)my_dlopen_replacement, (void**)&original_dlopen_ptr) != 0 &&
+        xhook_register(".*\\linker.*$", "dlopen", (void*)my_dlopen_replacement, (void**)&original_dlopen_ptr) != 0 && // Mencakup linker dan linker64
+        xhook_register(".*\\libc.so$", "dlopen", (void*)my_dlopen_replacement, (void**)&original_dlopen_ptr) != 0 ) { // Beberapa implementasi libc mungkin juga mengeksposnya
+        ALOGW("Gagal mendaftarkan semua target hook untuk dlopen. Beberapa mungkin berhasil.");
+        // Tidak langsung error karena salah satu mungkin sudah cukup, tergantung implementasi sistem.
     } else {
-        ALOGI("Hook untuk dlopen berhasil didaftarkan.");
+        ALOGI("Hook untuk dlopen berhasil didaftarkan (atau setidaknya satu upaya berhasil).");
     }
 
     // Hook android_dlopen_ext
-    // Fungsi ini biasanya ada di libdl.so atau linker.
-    if (xhook_register(".*\\libdl.so$", "android_dlopen_ext", (void*)my_android_dlopen_ext_replacement, nullptr) != 0 &&
-        xhook_register(".*\\linker$", "android_dlopen_ext", (void*)my_android_dlopen_ext_replacement, nullptr) != 0 ) {
-        ALOGE("Gagal mendaftarkan hook untuk android_dlopen_ext");
+    // Menyimpan pointer fungsi asli ke original_android_dlopen_ext_ptr
+    if (xhook_register(".*\\libdl.so$", "android_dlopen_ext", (void*)my_android_dlopen_ext_replacement, (void**)&original_android_dlopen_ext_ptr) != 0 &&
+        xhook_register(".*\\linker.*$", "android_dlopen_ext", (void*)my_android_dlopen_ext_replacement, (void**)&original_android_dlopen_ext_ptr) != 0) {
+        ALOGW("Gagal mendaftarkan semua target hook untuk android_dlopen_ext.");
     } else {
-        ALOGI("Hook untuk android_dlopen_ext berhasil didaftarkan.");
+        ALOGI("Hook untuk android_dlopen_ext berhasil didaftarkan (atau setidaknya satu upaya berhasil).");
     }
 
     // Setelah semua hook didaftarkan, refresh cache hook
-    // Argumen 0 berarti hook untuk semua proses (dalam konteks Zygisk, ini akan berlaku untuk proses target saat di-fork)
-    // Argumen 1 berarti hook hanya untuk proses saat ini.
-    // Karena kita berada di postAppSpecialize, proses target sudah menjadi proses saat ini.
-    if (xhook_refresh(1) == 0) {
+    if (xhook_refresh(1) == 0) { // Argumen 1 berarti untuk proses saat ini
         ALOGI("xhook_refresh berhasil diterapkan.");
     } else {
         ALOGE("xhook_refresh gagal.");
     }
 
-    // (Opsional) Aktifkan mode debug xhook jika perlu
+    // (Opsional) Aktifkan mode debug xhook jika perlu untuk melihat log internal xhook
     // xhook_enable_debug(1);
-    // xhook_enable_sigsegv_protection(0); // Mungkin perlu dinonaktifkan jika ada masalah dengan SEGV handler xhook
+    // xhook_enable_sigsegv_protection(0); // Coba nonaktifkan jika ada crash SEGV yang mencurigakan terkait xhook
 
     ALOGI("Proses hooking dengan xhook selesai.");
 }
@@ -126,13 +121,11 @@ public:
     }
 
     void preAppSpecialize(zygisk::AppSpecializeArgs *args) override {
-        // Dapatkan nama proses
         const char *process_name_chars = env->GetStringUTFChars(args->nice_name, nullptr);
         if (process_name_chars) {
             std::string process_name(process_name_chars);
             env->ReleaseStringUTFChars(args->nice_name, process_name_chars);
 
-            // Periksa apakah ini proses target kita
             if (process_name == TARGET_PROCESS_NAME) {
                 ALOGI("preAppSpecialize: Proses target '%s' ditemukan untuk xhook logging.", TARGET_PROCESS_NAME);
                 is_target_process_for_xhook = true;
@@ -144,12 +137,10 @@ public:
         if (is_target_process_for_xhook) {
             ALOGI("postAppSpecialize: Dalam proses target '%s'. Melakukan hook dengan xhook.", TARGET_PROCESS_NAME);
             
-            // Menjalankan hooking di thread baru adalah praktik yang baik untuk menghindari ANR
-            // jika proses hooking memakan waktu atau ada masalah startup.
             std::thread hook_thread(do_hooking_with_xhook);
-            hook_thread.detach(); // Biarkan thread berjalan secara independen
+            hook_thread.detach(); 
 
-            is_target_process_for_xhook = false; // Reset flag
+            is_target_process_for_xhook = false; 
         }
     }
 
