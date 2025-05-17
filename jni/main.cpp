@@ -1,5 +1,6 @@
 #include <cstring>
 #include <unistd.h>
+#include <cerrno>
 #include <cstdlib>
 #include <android/log.h>
 #include <xhook.h> // Anda sudah menggunakan xhook
