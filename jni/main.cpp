@@ -66,13 +66,13 @@ static void do_hooking_with_xhook() {
 
     // Aktifkan mode debug xhook untuk log internal tambahan dari xhook
     // Letakkan ini di awal sebelum xhook_register atau xhook_refresh
-    int debug_result = xhook_enable_debug(1);
-    ALOGI("xhook_enable_debug(1) returned: %d (0 jika sukses)", debug_result);
+    xhook_enable_debug(1); // Panggil saja, tidak ada nilai kembalian
+    ALOGI("xhook_enable_debug(1) telah dipanggil.");
 
     // Nonaktifkan proteksi SIGSEGV xhook jika Anda mencurigai ada konflik dengan handler lain
     // atau jika xhook sendiri menyebabkan crash SEGV saat debug. Biasanya biarkan default.
-    // int sigsegv_result = xhook_enable_sigsegv_protection(0);
-    // ALOGI("xhook_enable_sigsegv_protection(0) returned: %d (0 jika sukses)", sigsegv_result);
+    // xhook_enable_sigsegv_protection(0); // Panggil saja
+    // ALOGI("xhook_enable_sigsegv_protection(0) telah dipanggil.");
 
 
     // Hook dlopen
@@ -116,6 +116,7 @@ static void do_hooking_with_xhook() {
 
     ALOGI("Proses hooking dengan xhook selesai (atau upaya telah dilakukan).");
 }
+
 
 
 class MyXHookLoggerModule : public zygisk::ModuleBase {
